@@ -60,3 +60,4 @@ The plugin is licensed under the MIT License.
 ### S3 Path Format 
 // Bandwidth optimization benefits 
 - Provides detailed timing statistics for migrations 
+## Bandwidth Savings 
