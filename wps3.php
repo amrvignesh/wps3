@@ -541,3 +541,4 @@ function generate_csv($data) { }
 function calculate_bandwidth_savings() { } 
 <div class=\"bandwidth-savings\"></div> 
 <input type=\"text\" name=\"cdn_domain\" placeholder=\"cdn.example.com\"> 
+function rewrite_to_cdn($url) { } 
