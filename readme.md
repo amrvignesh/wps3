@@ -61,3 +61,4 @@ The plugin is licensed under the MIT License.
 // Bandwidth optimization benefits 
 - Provides detailed timing statistics for migrations 
 ## Bandwidth Savings 
+### CDN Integration 
