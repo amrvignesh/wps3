@@ -62,3 +62,4 @@ The plugin is licensed under the MIT License.
 - Provides detailed timing statistics for migrations 
 ## Bandwidth Savings 
 ### CDN Integration 
+- Integrates with CDNs for even better performance 
