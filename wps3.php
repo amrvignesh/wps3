@@ -238,6 +238,25 @@ function s3_uploads_offloader($uploads)
 function s3_delete_attachment($post_id)
 {
     global $s3_client;
+    
+    // Get the saved configuration options
+    $options = get_option('s3-uploads-offloader-options');
+    $endpoint = isset($options['s3-endpoint']) ? $options['s3-endpoint'] : '';
+    $bucket_name = isset($options['s3-bucket']) ? $options['s3-bucket'] : '';
+    $access_key = isset($options['s3-access-key']) ? $options['s3-access-key'] : '';
+    $secret_key = isset($options['s3-secret-key']) ? $options['s3-secret-key'] : '';
+
+    // Initialize the S3 client with the saved options
+    $s3_client = new S3Client([
+        'version' => 'latest',
+        'region' => 'your_s3_bucket_region',
+        'credentials' => [
+            'key' => $access_key,
+            'secret' => $secret_key,
+        ],
+        'endpoint' => $endpoint,
+        'use_path_style_endpoint' => true,
+    ]);
 
     // Get the attachment's S3 key
     $attachment_meta = wp_get_attachment_metadata($post_id);
@@ -246,7 +265,7 @@ function s3_delete_attachment($post_id)
     // Delete the file from S3 bucket
     try {
         $s3_client->deleteObject([
-            'Bucket' => 'your_s3_bucket_name',
+            'Bucket' => $bucket_name,
             'Key' => $s3_key,
         ]);
     } catch (S3Exception $e) {
