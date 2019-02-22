@@ -11,6 +11,8 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
+require_once 'aws/aws-autoloader.php';
+
 /**
  * The S3 Uploads Offloader class.
  */
@@ -50,6 +52,11 @@ class WPS3
 	 */
 	public function __construct()
 	{
+		// Load the plugin's settings.
+		$this->bucket_name = get_option('wps3_bucket_name');
+		$this->bucket_region = get_option('wps3_bucket_region');
+		$this->bucket_folder = get_option('wps3_bucket_folder');
+
 		$this->s3_client = new \Aws\S3\S3Client([
 			'version' => 'latest',
 			'region' => $this->bucket_region,
@@ -58,11 +65,6 @@ class WPS3
 				'secret' => get_option('wps3_secret_key')
 			]
 		]);
-
-		// Load the plugin's settings.
-		$this->bucket_name = get_option('wps3_bucket_name');
-		$this->bucket_region = get_option('wps3_bucket_region');
-		$this->bucket_folder = get_option('wps3_bucket_folder');
 	}
 
 	/**
