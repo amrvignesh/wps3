@@ -56,15 +56,16 @@ class WPS3
 		$this->bucket_name = get_option('wps3_bucket_name');
 		$this->bucket_region = get_option('wps3_bucket_region');
 		$this->bucket_folder = get_option('wps3_bucket_folder');
-
-		$this->s3_client = new \Aws\S3\S3Client([
-			'version' => 'latest',
-			'region' => $this->bucket_region,
-			'credentials' => [
-				'key' => get_option('wps3_access_key'),
-				'secret' => get_option('wps3_secret_key')
-			]
-		]);
+		if (!empty($this->bucket_region)) {
+			$this->s3_client = new \Aws\S3\S3Client([
+				'version' => 'latest',
+				'region' => $this->bucket_region,
+				'credentials' => [
+					'key' => get_option('wps3_access_key'),
+					'secret' => get_option('wps3_secret_key')
+				]
+			]);
+		}
 	}
 
 	/**
@@ -252,8 +253,7 @@ class WPS3
 	public function settings_field_bucket_name_callback()
 	{
 		?>
-		<input type="text" name="wps3_bucket_name"
-			value="<?php echo esc_attr(get_option('wps3_bucket_name')); ?>" />
+		<input type="text" name="wps3_bucket_name" value="<?php echo esc_attr(get_option('wps3_bucket_name')); ?>" />
 		<p class="description">
 			<?php _e('The name of your S3 bucket.', 'wps3'); ?>
 		</p>
@@ -266,8 +266,7 @@ class WPS3
 	public function settings_field_bucket_region_callback()
 	{
 		?>
-		<input type="text" name="wps3_bucket_region"
-			value="<?php echo esc_attr(get_option('wps3_bucket_region')); ?>" />
+		<input type="text" name="wps3_bucket_region" value="<?php echo esc_attr(get_option('wps3_bucket_region')); ?>" />
 		<p class="description">
 			<?php _e('The region of your S3 bucket.', 'wps3'); ?>
 		</p>
@@ -280,8 +279,7 @@ class WPS3
 	public function settings_field_bucket_folder_callback()
 	{
 		?>
-		<input type="text" name="wps3_bucket_folder"
-			value="<?php echo esc_attr(get_option('wps3_bucket_folder')); ?>" />
+		<input type="text" name="wps3_bucket_folder" value="<?php echo esc_attr(get_option('wps3_bucket_folder')); ?>" />
 		<p class="description">
 			<?php _e('The folder in your S3 bucket where files should be stored.', 'wps3'); ?>
 		</p>
@@ -352,7 +350,9 @@ class WPS3
 	{
 		?>
 		<div class="wrap">
-			<h1><?php _e('S3 Uploads Offloader Settings', 'wps3'); ?></h1>
+			<h1>
+				<?php _e('S3 Uploads Offloader Settings', 'wps3'); ?>
+			</h1>
 			<form method="post" action="options.php">
 				<?php
 				settings_fields('wps3');
