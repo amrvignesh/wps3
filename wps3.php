@@ -124,3 +124,57 @@ function s3_config_page() {
     </div>
     <?php
 }
+
+// Hook into WordPress admin init action to register and define the settings fields
+add_action('admin_init', 's3_config_init');
+
+// Function to register and define the settings fields
+function s3_config_init() {
+    // Register settings
+    register_setting(
+        's3-uploads-offloader-settings',
+        's3-uploads-offloader-options',
+        's3_validate_options'
+    );
+
+    // Add settings section
+    add_settings_section(
+        's3-uploads-offloader-section',
+        'S3 Configuration',
+        's3_config_section_callback',
+        's3-uploads-offloader-settings'
+    );
+
+    // Add settings fields
+    add_settings_field(
+        's3-endpoint',
+        'S3 Endpoint',
+        's3_endpoint_field_callback',
+        's3-uploads-offloader-settings',
+        's3-uploads-offloader-section'
+    );
+
+    add_settings_field(
+        's3-bucket',
+        'S3 Bucket Name',
+        's3_bucket_field_callback',
+        's3-uploads-offloader-settings',
+        's3-uploads-offloader-section'
+    );
+
+    add_settings_field(
+        's3-access-key',
+        'S3 Access Key',
+        's3_access_key_field_callback',
+        's3-uploads-offloader-settings',
+        's3-uploads-offloader-section'
+    );
+
+    add_settings_field(
+        's3-secret-key',
+        'S3 Secret Key',
+        's3_secret_key_field_callback',
+        's3-uploads-offloader-settings',
+        's3-uploads-offloader-section'
+    );
+}
