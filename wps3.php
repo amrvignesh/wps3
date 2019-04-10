@@ -50,7 +50,14 @@ class WPS3
 	 */
 	public function __construct()
 	{
-		$this->s3_client = new \Aws\S3\S3Client();
+		$this->s3_client = new \Aws\S3\S3Client([
+			'version' => 'latest',
+			'region' => $this->bucket_region,
+			'credentials' => [
+				'key' => get_option('wps3_access_key'),
+				'secret' => get_option('wps3_secret_key')
+			]
+		]);
 
 		// Load the plugin's settings.
 		$this->bucket_name = get_option('wps3_bucket_name');
@@ -66,6 +73,8 @@ class WPS3
 		add_action('wp_loaded', [$this, 'init']);
 		add_action('wp_insert_attachment', [$this, 'upload_attachment']);
 		add_action('delete_attachment', [$this, 'delete_attachment']);
+		add_action('admin_menu', [$this, 'add_admin_menu']);
+		add_action('admin_init', [$this, 'register_settings']);
 	}
 
 	/**
@@ -87,7 +96,7 @@ class WPS3
 		$this->move_existing_files();
 
 		// Intercept the upload process.
-		add_filter('wp_handle_upload_overrides', [$this, 'upload_overrides']);
+		add_filter('wp_handle_upload', [$this, 'upload_overrides']);
 	}
 
 	/**
@@ -110,7 +119,7 @@ class WPS3
 	 */
 	protected function upload_file($file)
 	{
-		$key = basename($file);
+		$key = $this->bucket_folder . '/' . basename($file);
 		$this->s3_client->putObject([
 			'Bucket' => $this->bucket_name,
 			'Key' => $key,
@@ -121,20 +130,20 @@ class WPS3
 	/**
 	 * Override the WordPress upload process to upload files to the S3 bucket.
 	 *
-	 * @param array $overrides The upload overrides.
+	 * @param array $file The uploaded file information.
 	 * @return array
 	 */
-	public function upload_overrides($overrides)
+	public function upload_overrides($file)
 	{
 		// Check if the plugin is enabled.
 		if (!get_option('wps3_enabled')) {
-			return $overrides;
+			return $file;
 		}
 
-		// Set the upload destination to the S3 bucket.
-		$overrides['file_destination'] = $this->bucket_name . '/' . $this->bucket_folder;
+		$upload_dir = wp_upload_dir();
+		$file['url'] = $upload_dir['baseurl'] . '/' . $this->bucket_folder . '/' . $file['name'];
 
-		return $overrides;
+		return $file;
 	}
 
 	/**
@@ -144,14 +153,28 @@ class WPS3
 	 */
 	public function delete_attachment($attachment_id)
 	{
-		$attachment = get_attachment_metadata($attachment_id);
+		$attachment = get_post_meta($attachment_id, '_wp_attached_file', true);
 
-		if (!empty($attachment['file'])) {
+		if (!empty($attachment)) {
 			$this->s3_client->deleteObject([
 				'Bucket' => $this->bucket_name,
-				'Key' => $attachment['file'],
+				'Key' => $attachment,
 			]);
 		}
+	}
+
+	/**
+	 * Add the plugin's settings page to the admin menu.
+	 */
+	public function add_admin_menu()
+	{
+		add_options_page(
+			'S3 Uploads Offloader Settings',
+			'S3 Uploads Offloader',
+			'manage_options',
+			'wps3-settings',
+			[$this, 'render_settings_page']
+		);
 	}
 
 	/**
@@ -163,14 +186,14 @@ class WPS3
 			'wps3_section',
 			__('S3 Uploads Offloader', 'wps3'),
 			[$this, 'settings_section_callback'],
-			'wps3'
+			'wps3-settings'
 		);
 
 		add_settings_field(
 			'wps3_bucket_name',
 			__('S3 Bucket Name', 'wps3'),
 			[$this, 'settings_field_bucket_name_callback'],
-			'wps3',
+			'wps3-settings',
 			'wps3_section'
 		);
 
@@ -178,7 +201,7 @@ class WPS3
 			'wps3_bucket_region',
 			__('S3 Bucket Region', 'wps3'),
 			[$this, 'settings_field_bucket_region_callback'],
-			'wps3',
+			'wps3-settings',
 			'wps3_section'
 		);
 
@@ -186,26 +209,26 @@ class WPS3
 			'wps3_bucket_folder',
 			__('S3 Bucket Folder', 'wps3'),
 			[$this, 'settings_field_bucket_folder_callback'],
-			'wps3',
+			'wps3-settings',
 			'wps3_section'
 		);
 
 		register_setting(
 			'wps3',
 			'wps3_bucket_name',
-			[$this, 'validate_bucket_name']
+			['sanitize_callback' => 'sanitize_text_field']
 		);
 
 		register_setting(
 			'wps3',
 			'wps3_bucket_region',
-			[$this, 'validate_bucket_region']
+			['sanitize_callback' => 'sanitize_text_field']
 		);
 
 		register_setting(
 			'wps3',
 			'wps3_bucket_folder',
-			[$this, 'validate_bucket_folder']
+			['sanitize_callback' => 'sanitize_text_field']
 		);
 	}
 
@@ -277,8 +300,6 @@ class WPS3
 				'empty',
 				__('Please enter a value for the S3 Bucket Name.', 'wps3')
 			);
-
-			return '';
 		}
 
 		return $value;
@@ -298,8 +319,6 @@ class WPS3
 				'empty',
 				__('Please enter a value for the S3 Bucket Region.', 'wps3')
 			);
-
-			return '';
 		}
 
 		return $value;
@@ -319,11 +338,28 @@ class WPS3
 				'empty',
 				__('Please enter a value for the S3 Bucket Folder.', 'wps3')
 			);
-
-			return '';
 		}
 
 		return $value;
+	}
+
+	/**
+	 * Render the settings page for the plugin.
+	 */
+	public function render_settings_page()
+	{
+		?>
+		<div class="wrap">
+			<h1><?php _e('S3 Uploads Offloader Settings', 'wps3'); ?></h1>
+			<form method="post" action="options.php">
+				<?php
+				settings_fields('wps3');
+				do_settings_sections('wps3-settings');
+				submit_button();
+				?>
+			</form>
+		</div>
+		<?php
 	}
 
 } // end class WPS3
@@ -333,13 +369,9 @@ class WPS3
  */
 function register_wps3()
 {
-	register_plugin(
-		'wps3',
-		__FILE__,
-		'Vignesh',
-		'0.1',
-		'https://github.com/amrvignesh/wps3'
-	);
+	$wps3 = new WPS3();
+	$wps3->register_hooks();
+	$wps3->add_admin_menu();
 }
 
 add_action('plugins_loaded', 'register_wps3');
