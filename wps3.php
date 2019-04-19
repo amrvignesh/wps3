@@ -89,3 +89,17 @@ function s3_delete_attachment($post_id)
         // Handle any error that occurred during deletion
     }
 }
+
+// Add menu item in the WordPress admin dashboard
+add_action('admin_menu', 's3_config_menu');
+
+// Function to create the configuration page in the admin dashboard
+function s3_config_menu() {
+    add_options_page(
+        'S3 Uploads Offloader Settings',
+        'S3 Uploads Offloader',
+        'manage_options',
+        's3-uploads-offloader',
+        's3_config_page'
+    );
+}
