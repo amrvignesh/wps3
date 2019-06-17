@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 /**
  * The S3 Uploads Offloader class.
  */
-class S3_Uploads_Offloader
+class WPS3
 {
 
 	/**
@@ -53,9 +53,9 @@ class S3_Uploads_Offloader
 		$this->s3_client = new \Aws\S3\S3Client();
 
 		// Load the plugin's settings.
-		$this->bucket_name = get_option('s3_uploads_offloader_bucket_name');
-		$this->bucket_region = get_option('s3_uploads_offloader_bucket_region');
-		$this->bucket_folder = get_option('s3_uploads_offloader_bucket_folder');
+		$this->bucket_name = get_option('wps3_bucket_name');
+		$this->bucket_region = get_option('wps3_bucket_region');
+		$this->bucket_folder = get_option('wps3_bucket_folder');
 	}
 
 	/**
@@ -74,7 +74,7 @@ class S3_Uploads_Offloader
 	public function init()
 	{
 		// Check if the plugin is enabled.
-		if (!get_option('s3_uploads_offloader_enabled')) {
+		if (!get_option('wps3_enabled')) {
 			return;
 		}
 
@@ -127,7 +127,7 @@ class S3_Uploads_Offloader
 	public function upload_overrides($overrides)
 	{
 		// Check if the plugin is enabled.
-		if (!get_option('s3_uploads_offloader_enabled')) {
+		if (!get_option('wps3_enabled')) {
 			return $overrides;
 		}
 
@@ -160,51 +160,51 @@ class S3_Uploads_Offloader
 	public function register_settings()
 	{
 		add_settings_section(
-			's3_uploads_offloader_section',
-			__('S3 Uploads Offloader', 's3_uploads_offloader'),
+			'wps3_section',
+			__('S3 Uploads Offloader', 'wps3'),
 			[$this, 'settings_section_callback'],
-			's3_uploads_offloader'
+			'wps3'
 		);
 
 		add_settings_field(
-			's3_uploads_offloader_bucket_name',
-			__('S3 Bucket Name', 's3_uploads_offloader'),
+			'wps3_bucket_name',
+			__('S3 Bucket Name', 'wps3'),
 			[$this, 'settings_field_bucket_name_callback'],
-			's3_uploads_offloader',
-			's3_uploads_offloader_section'
+			'wps3',
+			'wps3_section'
 		);
 
 		add_settings_field(
-			's3_uploads_offloader_bucket_region',
-			__('S3 Bucket Region', 's3_uploads_offloader'),
+			'wps3_bucket_region',
+			__('S3 Bucket Region', 'wps3'),
 			[$this, 'settings_field_bucket_region_callback'],
-			's3_uploads_offloader',
-			's3_uploads_offloader_section'
+			'wps3',
+			'wps3_section'
 		);
 
 		add_settings_field(
-			's3_uploads_offloader_bucket_folder',
-			__('S3 Bucket Folder', 's3_uploads_offloader'),
+			'wps3_bucket_folder',
+			__('S3 Bucket Folder', 'wps3'),
 			[$this, 'settings_field_bucket_folder_callback'],
-			's3_uploads_offloader',
-			's3_uploads_offloader_section'
+			'wps3',
+			'wps3_section'
 		);
 
 		register_setting(
-			's3_uploads_offloader',
-			's3_uploads_offloader_bucket_name',
+			'wps3',
+			'wps3_bucket_name',
 			[$this, 'validate_bucket_name']
 		);
 
 		register_setting(
-			's3_uploads_offloader',
-			's3_uploads_offloader_bucket_region',
+			'wps3',
+			'wps3_bucket_region',
 			[$this, 'validate_bucket_region']
 		);
 
 		register_setting(
-			's3_uploads_offloader',
-			's3_uploads_offloader_bucket_folder',
+			'wps3',
+			'wps3_bucket_folder',
 			[$this, 'validate_bucket_folder']
 		);
 	}
@@ -216,7 +216,7 @@ class S3_Uploads_Offloader
 	{
 		?>
 		<p>
-			<?php _e('This plugin allows you to offload all WordPress uploads to an S3-compatible storage service.', 's3_uploads_offloader'); ?>
+			<?php _e('This plugin allows you to offload all WordPress uploads to an S3-compatible storage service.', 'wps3'); ?>
 		</p>
 		<?php
 	}
@@ -227,10 +227,10 @@ class S3_Uploads_Offloader
 	public function settings_field_bucket_name_callback()
 	{
 		?>
-		<input type="text" name="s3_uploads_offloader_bucket_name"
-			value="<?php echo esc_attr(get_option('s3_uploads_offloader_bucket_name')); ?>" />
+		<input type="text" name="wps3_bucket_name"
+			value="<?php echo esc_attr(get_option('wps3_bucket_name')); ?>" />
 		<p class="description">
-			<?php _e('The name of your S3 bucket.', 's3_uploads_offloader'); ?>
+			<?php _e('The name of your S3 bucket.', 'wps3'); ?>
 		</p>
 		<?php
 	}
@@ -241,10 +241,10 @@ class S3_Uploads_Offloader
 	public function settings_field_bucket_region_callback()
 	{
 		?>
-		<input type="text" name="s3_uploads_offloader_bucket_region"
-			value="<?php echo esc_attr(get_option('s3_uploads_offloader_bucket_region')); ?>" />
+		<input type="text" name="wps3_bucket_region"
+			value="<?php echo esc_attr(get_option('wps3_bucket_region')); ?>" />
 		<p class="description">
-			<?php _e('The region of your S3 bucket.', 's3_uploads_offloader'); ?>
+			<?php _e('The region of your S3 bucket.', 'wps3'); ?>
 		</p>
 		<?php
 	}
@@ -255,10 +255,10 @@ class S3_Uploads_Offloader
 	public function settings_field_bucket_folder_callback()
 	{
 		?>
-		<input type="text" name="s3_uploads_offloader_bucket_folder"
-			value="<?php echo esc_attr(get_option('s3_uploads_offloader_bucket_folder')); ?>" />
+		<input type="text" name="wps3_bucket_folder"
+			value="<?php echo esc_attr(get_option('wps3_bucket_folder')); ?>" />
 		<p class="description">
-			<?php _e('The folder in your S3 bucket where files should be stored.', 's3_uploads_offloader'); ?>
+			<?php _e('The folder in your S3 bucket where files should be stored.', 'wps3'); ?>
 		</p>
 		<?php
 	}
@@ -273,9 +273,9 @@ class S3_Uploads_Offloader
 	{
 		if (empty($value)) {
 			add_settings_error(
-				's3_uploads_offloader_bucket_name',
+				'wps3_bucket_name',
 				'empty',
-				__('Please enter a value for the S3 Bucket Name.', 's3_uploads_offloader')
+				__('Please enter a value for the S3 Bucket Name.', 'wps3')
 			);
 
 			return '';
@@ -294,9 +294,9 @@ class S3_Uploads_Offloader
 	{
 		if (empty($value)) {
 			add_settings_error(
-				's3_uploads_offloader_bucket_region',
+				'wps3_bucket_region',
 				'empty',
-				__('Please enter a value for the S3 Bucket Region.', 's3_uploads_offloader')
+				__('Please enter a value for the S3 Bucket Region.', 'wps3')
 			);
 
 			return '';
@@ -315,9 +315,9 @@ class S3_Uploads_Offloader
 	{
 		if (empty($value)) {
 			add_settings_error(
-				's3_uploads_offloader_bucket_folder',
+				'wps3_bucket_folder',
 				'empty',
-				__('Please enter a value for the S3 Bucket Folder.', 's3_uploads_offloader')
+				__('Please enter a value for the S3 Bucket Folder.', 'wps3')
 			);
 
 			return '';
@@ -326,15 +326,15 @@ class S3_Uploads_Offloader
 		return $value;
 	}
 
-} // end class S3_Uploads_Offloader
+} // end class WPS3
 
 /**
  * Register the S3 Uploads Offloader plugin.
  */
-function register_s3_uploads_offloader()
+function register_wps3()
 {
 	register_plugin(
-		's3_uploads_offloader',
+		'wps3',
 		__FILE__,
 		'Vignesh',
 		'0.1',
@@ -342,4 +342,4 @@ function register_s3_uploads_offloader()
 	);
 }
 
-add_action('plugins_loaded', 'register_s3_uploads_offloader');
+add_action('plugins_loaded', 'register_wps3');
