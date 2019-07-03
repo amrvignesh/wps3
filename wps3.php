@@ -24,6 +24,7 @@ $s3_client = new S3Client([
 
 // Hook into WordPress actions
 add_filter('upload_dir', 's3_uploads_offloader');
+add_action('delete_attachment', 's3_delete_attachment');
 
 // Function to offload uploads folder to S3
 function s3_uploads_offloader($uploads) {
@@ -65,6 +66,7 @@ function s3_uploads_offloader($uploads) {
     return $uploads;
 }
 
+// Function to delete attachment from S3
 function s3_delete_attachment($post_id) {
     global $s3_client;
 
