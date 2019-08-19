@@ -1,13 +1,40 @@
+S3 Uploads Offloader
+This plugin offloads all WordPress uploads to an S3-compatible storage service.
 
-In this modified code, you need to update the following parameters:
+Features
+Offloads all WordPress uploads to an S3-compatible storage service.
+Moves existing files from the local uploads folder to the S3 bucket.
+Overrides the WordPress upload process to upload files to the S3 bucket.
+Deletes files from the S3 bucket when they are deleted from WordPress.
+Provides a settings page to configure the plugin.
+Requirements
+WordPress 5.0 or later
+An S3-compatible storage service
+Installation
+Download the plugin from GitHub.
+In WordPress, go to Plugins > Add New.
+Click the "Upload Plugin" button.
+Select the plugin file that you downloaded in step 1.
+Click the "Install Now" button.
+Click the "Activate" button.
+Settings
+The plugin has a settings page that can be accessed from WordPress > Settings > S3 Uploads Offloader.
 
-- `'your_s3_compatible_endpoint'`: Replace this with the endpoint URL of your S3-compatible storage provider.
-- `'your_s3_bucket_name'`: Replace this with the name of your S3-compatible storage bucket.
-- `'your_desired_folder_in_s3_bucket'`: Replace this with the desired folder structure within your S3-compatible storage bucket.
+The following settings are available:
 
-Make sure to also update the S3 client configuration with the appropriate access key and secret key for your S3-compatible storage provider.
+S3 Bucket Name: The name of your S3 bucket.
+S3 Bucket Region: The region of your S3 bucket.
+S3 Bucket Folder: The folder in your S3 bucket where files should be stored.
+Usage
+Once the plugin is installed and configured, all new uploads will be stored in your S3 bucket. Existing files will be moved to the S3 bucket the next time you visit the WordPress uploads page.
 
-Please note that the code provided is a basic starting point and may require additional adjustments depending on the specific configuration and requirements of your S3-compatible storage provider.
+You can delete files from the S3 bucket by deleting them from WordPress. The plugin will automatically remove the files from the S3 bucket when you do this.
+
+Support
+If you have any questions or problems with the plugin, please open an issue on GitHub.
+
+License
+The plugin is licensed under the MIT License.
 
 # Code Documentation
 
