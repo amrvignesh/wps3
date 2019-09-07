@@ -64,3 +64,21 @@ function s3_uploads_offloader($uploads) {
 
     return $uploads;
 }
+
+function s3_delete_attachment($post_id) {
+    global $s3_client;
+
+    // Get the attachment's S3 key
+    $attachment_meta = wp_get_attachment_metadata($post_id);
+    $s3_key = 'your_desired_folder_in_s3_bucket/' . $attachment_meta['file'];
+
+    // Delete the file from S3 bucket
+    try {
+        $s3_client->deleteObject([
+            'Bucket' => 'your_s3_bucket_name',
+            'Key' => $s3_key,
+        ]);
+    } catch (S3Exception $e) {
+        // Handle any error that occurred during deletion
+    }
+}
