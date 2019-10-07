@@ -103,3 +103,24 @@ function s3_config_menu() {
         's3_config_page'
     );
 }
+
+// Function to render the configuration page HTML
+function s3_config_page() {
+    // Check user capabilities
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+    ?>
+    <div class="wrap">
+        <h1>S3 Uploads Offloader Settings</h1>
+        <form method="post" action="options.php">
+            <?php
+                // Output the settings fields
+                settings_fields('s3-uploads-offloader-settings');
+                do_settings_sections('s3-uploads-offloader-settings');
+                submit_button('Save Settings');
+            ?>
+        </form>
+    </div>
+    <?php
+}
