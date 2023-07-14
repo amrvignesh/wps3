@@ -119,6 +119,7 @@ class WPS3
 	 * Upload a file to the S3 bucket.
 	 *
 	 * @param string $file The path to the file.
+	 **/
 	// Include necessary WordPress files
 	require_once ABSPATH . 'wp-admin/includes/plugin.php';
 	require_once ABSPATH . 'wp-admin/includes/file.php';
@@ -444,3 +445,20 @@ class WPS3
 		}
 
 		add_action( 'plugins_loaded', 'register_wps3' );
+
+		function replace_url_with_s3_url($local_url) {
+			// Check if the file is a local upload. If not, return original URL.
+			$uploads_dir = wp_upload_dir();
+			if (false === strpos($local_url, $uploads_dir['baseurl'] . '/')) {
+				return $local_url;
+			}
+		
+			// Get the file path relative to the WordPress uploads directory
+			$file_path = str_replace($uploads_dir['baseurl'] . '/', '', $local_url);
+		
+			// Construct the S3 URL using the bucket name and file path
+			$s3_url = 'https://s3.' . AWS_REGION . '.amazonaws.com/' . AWS_BUCKET_NAME . '/' . $file_path;
+		
+			return $s3_url;
+		}
+		add_filter('wp_get_attachment_url', 'replace_url_with_s3_url');
