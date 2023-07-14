@@ -119,261 +119,288 @@ class WPS3
 	 * Upload a file to the S3 bucket.
 	 *
 	 * @param string $file The path to the file.
-	 */
-	protected function upload_file($file)
-	{
-		$key = $this->bucket_folder . '/' . basename($file);
-		$this->s3_client->putObject([
-			'Bucket' => $this->bucket_name,
-			'Key' => $key,
-			'Body' => file_get_contents($file),
-		]);
-	}
+	// Include necessary WordPress files
+	require_once ABSPATH . 'wp-admin/includes/plugin.php';
+	require_once ABSPATH . 'wp-admin/includes/file.php';
+	require_once ABSPATH . 'wp-admin/includes/image.php';
 
-	/**
-	 * Override the WordPress upload process to upload files to the S3 bucket.
-	 *
-	 * @param array $file The uploaded file information.
-	 * @return array
-	 */
-	public function upload_overrides($file)
-	{
-		// Check if the plugin is enabled.
-		if (!get_option('wps3_enabled')) {
+	class WPS3 {
+
+		private $bucket_name;
+		private $bucket_region;
+		private $bucket_folder;
+		private $s3_client;
+
+		public function __construct() {
+			$this->bucket_name = get_option('wps3_bucket_name');
+			$this->bucket_region = get_option('wps3_bucket_region');
+			$this->bucket_folder = get_option('wps3_bucket_folder');
+
+			// Initialize S3 client
+			$this->s3_client = new Aws\S3\S3Client([
+				'region' => $this->bucket_region,
+				'version' => 'latest',
+			]);
+		}
+
+		/**
+		 * Register hooks for the plugin.
+		 */
+		public function register_hooks() {
+			add_filter('wp_handle_upload', [$this, 'upload_overrides']);
+			add_action('delete_attachment', [$this, 'delete_attachment']);
+			add_action('admin_menu', [$this, 'add_admin_menu']);
+			add_action('admin_init', [$this, 'register_settings']);
+		}
+
+		/**
+		 * Upload a file to the S3 bucket.
+		 *
+		 * @param string $file The path to the file to upload.
+		 */
+		protected function upload_file($file) {
+			$key = $this->bucket_folder . '/' . basename($file);
+			$this->s3_client->putObject([
+				'Bucket' => $this->bucket_name,
+				'Key' => $key,
+				'Body' => file_get_contents($file),
+			]);
+		}
+
+		/**
+		 * Override the WordPress upload process to upload files to the S3 bucket.
+		 *
+		 * @param array $file The uploaded file information.
+		 * @return array
+		 */
+		public function upload_overrides($file) {
+			// Check if the plugin is enabled.
+			if (!get_option('wps3_enabled')) {
+				return $file;
+			}
+
+			$upload_dir = wp_upload_dir();
+			$file['url'] = $upload_dir['baseurl'] . '/' . $this->bucket_folder . '/' . $file['name'];
+
+			// Upload the file to S3
+			$this->upload_file($file['file']);
+
 			return $file;
 		}
 
-		$upload_dir = wp_upload_dir();
-		$file['url'] = $upload_dir['baseurl'] . '/' . $this->bucket_folder . '/' . $file['name'];
+		/**
+		 * Delete a file from the S3 bucket when it is deleted from WordPress.
+		 *
+		 * @param int $attachment_id The attachment ID.
+		 */
+		public function delete_attachment($attachment_id) {
+			$attachment = get_post_meta($attachment_id, '_wp_attached_file', true);
 
-		return $file;
-	}
-
-	/**
-	 * Delete a file from the S3 bucket when it is deleted from WordPress.
-	 *
-	 * @param int $attachment_id The attachment ID.
-	 */
-	public function delete_attachment($attachment_id)
-	{
-		$attachment = get_post_meta($attachment_id, '_wp_attached_file', true);
-
-		if (!empty($attachment)) {
-			$this->s3_client->deleteObject([
-				'Bucket' => $this->bucket_name,
-				'Key' => $attachment,
-			]);
+			if (!empty($attachment)) {
+				$this->s3_client->deleteObject([
+					'Bucket' => $this->bucket_name,
+					'Key' => $attachment,
+				]);
+			}
 		}
-	}
 
-	/**
-	 * Add the plugin's settings page to the admin menu.
-	 */
-	public function add_admin_menu()
-	{
-		add_options_page(
-			'S3 Uploads Offloader Settings',
-			'S3 Uploads Offloader',
-			'manage_options',
-			'wps3-settings',
-			[$this, 'render_settings_page']
-		);
-	}
+		/**
+		 * Add the plugin's settings page to the admin menu.
+		 */
+		public function add_admin_menu() {
+			add_options_page(
+				'S3 Uploads Offloader Settings',
+				'S3 Uploads Offloader',
+				'manage_options',
+				'wps3-settings',
+				[$this, 'render_settings_page']
+			);
+		}
 
-	/**
-	 * Register the plugin's settings.
-	 */
-	public function register_settings()
-	{
-		add_settings_section(
-			'wps3_section',
-			__('S3 Uploads Offloader', 'wps3'),
-			[$this, 'settings_section_callback'],
-			'wps3-settings'
-		);
+		/**
+		 * Register the plugin's settings.
+		 */
+		public function register_settings() {
+			add_settings_section(
+				'wps3_section',
+				__('S3 Uploads Offloader', 'wps3'),
+				[$this, 'settings_section_callback'],
+				'wps3-settings'
+			);
 
-		add_settings_field(
-			'wps3_bucket_name',
-			__('S3 Bucket Name', 'wps3'),
-			[$this, 'settings_field_bucket_name_callback'],
-			'wps3-settings',
-			'wps3_section'
-		);
-
-		add_settings_field(
-			'wps3_bucket_region',
-			__('S3 Bucket Region', 'wps3'),
-			[$this, 'settings_field_bucket_region_callback'],
-			'wps3-settings',
-			'wps3_section'
-		);
-
-		add_settings_field(
-			'wps3_bucket_folder',
-			__('S3 Bucket Folder', 'wps3'),
-			[$this, 'settings_field_bucket_folder_callback'],
-			'wps3-settings',
-			'wps3_section'
-		);
-
-		register_setting(
-			'wps3',
-			'wps3_bucket_name',
-			['sanitize_callback' => 'sanitize_text_field']
-		);
-
-		register_setting(
-			'wps3',
-			'wps3_bucket_region',
-			['sanitize_callback' => 'sanitize_text_field']
-		);
-
-		register_setting(
-			'wps3',
-			'wps3_bucket_folder',
-			['sanitize_callback' => 'sanitize_text_field']
-		);
-	}
-
-	/**
-	 * Render the S3 Uploads Offloader settings section.
-	 */
-	public function settings_section_callback()
-	{
-		?>
-		<p>
-			<?php _e('This plugin allows you to offload all WordPress uploads to an S3-compatible storage service.', 'wps3'); ?>
-		</p>
-		<?php
-	}
-
-	/**
-	 * Render the S3 Bucket Name settings field.
-	 */
-	public function settings_field_bucket_name_callback()
-	{
-		?>
-		<input type="text" name="wps3_bucket_name" value="<?php echo esc_attr(get_option('wps3_bucket_name')); ?>" />
-		<p class="description">
-			<?php _e('The name of your S3 bucket.', 'wps3'); ?>
-		</p>
-		<?php
-	}
-
-	/**
-	 * Render the S3 Bucket Region settings field.
-	 */
-	public function settings_field_bucket_region_callback()
-	{
-		?>
-		<input type="text" name="wps3_bucket_region" value="<?php echo esc_attr(get_option('wps3_bucket_region')); ?>" />
-		<p class="description">
-			<?php _e('The region of your S3 bucket.', 'wps3'); ?>
-		</p>
-		<?php
-	}
-
-	/**
-	 * Render the S3 Bucket Folder settings field.
-	 */
-	public function settings_field_bucket_folder_callback()
-	{
-		?>
-		<input type="text" name="wps3_bucket_folder" value="<?php echo esc_attr(get_option('wps3_bucket_folder')); ?>" />
-		<p class="description">
-			<?php _e('The folder in your S3 bucket where files should be stored.', 'wps3'); ?>
-		</p>
-		<?php
-	}
-
-	/**
-	 * Validate the S3 Bucket Name setting.
-	 *
-	 * @param string $value The value of the setting.
-	 * @return string
-	 */
-	public function validate_bucket_name($value)
-	{
-		if (empty($value)) {
-			add_settings_error(
+			add_settings_field(
 				'wps3_bucket_name',
-				'empty',
-				__('Please enter a value for the S3 Bucket Name.', 'wps3')
+				__('S3 Bucket Name', 'wps3'),
+				[$this, 'settings_field_bucket_name_callback'],
+				'wps3-settings',
+				'wps3_section'
 			);
-		}
 
-		return $value;
-	}
-
-	/**
-	 * Validate the S3 Bucket Region setting.
-	 *
-	 * @param string $value The value of the setting.
-	 * @return string
-	 */
-	public function validate_bucket_region($value)
-	{
-		if (empty($value)) {
-			add_settings_error(
+			add_settings_field(
 				'wps3_bucket_region',
-				'empty',
-				__('Please enter a value for the S3 Bucket Region.', 'wps3')
+				__('S3 Bucket Region', 'wps3'),
+				[$this, 'settings_field_bucket_region_callback'],
+				'wps3-settings',
+				'wps3_section'
 			);
-		}
 
-		return $value;
-	}
-
-	/**
-	 * Validate the S3 Bucket Folder setting.
-	 *
-	 * @param string $value The value of the setting.
-	 * @return string
-	 */
-	public function validate_bucket_folder($value)
-	{
-		if (empty($value)) {
-			add_settings_error(
+			add_settings_field(
 				'wps3_bucket_folder',
-				'empty',
-				__('Please enter a value for the S3 Bucket Folder.', 'wps3')
+				__('S3 Bucket Folder', 'wps3'),
+				[$this, 'settings_field_bucket_folder_callback'],
+				'wps3-settings',
+				'wps3_section'
+			);
+
+			register_setting(
+				'wps3',
+				'wps3_bucket_name',
+				['sanitize_callback' => 'sanitize_text_field']
+			);
+
+			register_setting(
+				'wps3',
+				'wps3_bucket_region',
+				['sanitize_callback' => 'sanitize_text_field']
+			);
+
+			register_setting(
+				'wps3',
+				'wps3_bucket_folder',
+				['sanitize_callback' => 'sanitize_text_field']
 			);
 		}
 
-		return $value;
-	}
+		/**
+		 * Render the S3 Uploads Offloader settings section.
+		 */
+		public function settings_section_callback() {
+			?>
+			<p>
+				<?php _e('This plugin allows you to offload all WordPress uploads to an S3-compatible storage service.', 'wps3'); ?>
+			</p>
+			<?php
+		}
+
+		/**
+		 * Render the S3 Bucket Name settings field.
+		 */
+		public function settings_field_bucket_name_callback() {
+			?>
+			<input type="text" name="wps3_bucket_name" value="<?php echo esc_attr(get_option('wps3_bucket_name')); ?>" />
+			<p class="description">
+				<?php _e('The name of your S3 bucket.', 'wps3'); ?>
+			</p>
+			<?php
+		}
+
+		/**
+		 * Render the S3 Bucket Region settings field.
+		 */
+		public function settings_field_bucket_region_callback() {
+			?>
+			<input type="text" name="wps3_bucket_region" value="<?php echo esc_attr(get_option('wps3_bucket_region')); ?>" />
+			<p class="description">
+				<?php _e('The region of your S3 bucket.', 'wps3'); ?>
+			</p>
+			<?php
+		}
+
+		/**
+		 * Render the S3 Bucket Folder settings field.
+		 */
+		public function settings_field_bucket_folder_callback() {
+			?>
+			<input type="text" name="wps3_bucket_folder" value="<?php echo esc_attr(get_option('wps3_bucket_folder')); ?>" />
+			<p class="description">
+				<?php _e('The folder in your S3 bucket where files should be stored.', 'wps3'); ?>
+			</p>
+			<?php
+		}
+
+		/**
+		 * Validate the S3 Bucket Name setting.
+		 *
+		 * @param string $value The value of the setting.
+		 * @return string
+		 */
+		public function validate_bucket_name($value) {
+			if (empty($value)) {
+				add_settings_error(
+					'wps3_bucket_name',
+					'empty',
+					__('Please enter a value for the S3 Bucket Name.', 'wps3')
+				);
+			}
+
+			return $value;
+		}
+
+		/**
+		 * Validate the S3 Bucket Region setting.
+		 *
+		 * @param string $value The value of the setting.
+		 * @return string
+		 */
+		public function validate_bucket_region($value) {
+			if (empty($value)) {
+				add_settings_error(
+					'wps3_bucket_region',
+					'empty',
+					__('Please enter a value for the S3 Bucket Region.', 'wps3')
+				);
+			}
+
+			return $value;
+		}
+
+		/**
+		 * Validate the S3 Bucket Folder setting.
+		 *
+		 * @param string $value The value of the setting.
+		 * @return string
+		 */
+		public function validate_bucket_folder($value) {
+			if (empty($value)) {
+				add_settings_error(
+					'wps3_bucket_folder',
+					'empty',
+					__('Please enter a value for the S3 Bucket Folder.', 'wps3')
+				);
+			}
+
+			return $value;
+		}
+
+		/**
+		 * Render the settings page for the plugin.
+		 */
+		public function render_settings_page() {
+			?>
+			<div class="wrap">
+				<h1>
+					<?php _e('S3 Uploads Offloader Settings', 'wps3'); ?>
+				</h1>
+				<form method="post" action="options.php">
+					<?php
+					settings_fields('wps3');
+					do_settings_sections('wps3-settings');
+					submit_button();
+					?>
+				</form>
+			</div>
+			<?php
+		}
+
+	} // end class WPS3
 
 	/**
-	 * Render the settings page for the plugin.
+	 * Register the S3 Uploads Offloader plugin.
 	 */
-	public function render_settings_page()
-	{
-		?>
-		<div class="wrap">
-			<h1>
-				<?php _e('S3 Uploads Offloader Settings', 'wps3'); ?>
-			</h1>
-			<form method="post" action="options.php">
-				<?php
-				settings_fields('wps3');
-				do_settings_sections('wps3-settings');
-				submit_button();
-				?>
-			</form>
-		</div>
-		<?php
+	function register_wps3() {
+		$wps3 = new WPS3();
+		$wps3->register_hooks();
+		$wps3->add_admin_menu();
 	}
 
-} // end class WPS3
-
-/**
- * Register the S3 Uploads Offloader plugin.
- */
-function register_wps3()
-{
-	$wps3 = new WPS3();
-	$wps3->register_hooks();
-	$wps3->add_admin_menu();
-}
-
-add_action('plugins_loaded', 'register_wps3');
+	add_action('plugins_loaded', 'register_wps3');
