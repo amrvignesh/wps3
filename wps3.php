@@ -462,3 +462,7 @@ class WPS3
 			return $s3_url;
 		}
 		add_filter('wp_get_attachment_url', 'replace_url_with_s3_url');
+/ * * 
+   *   A J A X   h a n d l e r   f o r   s t a r t i n g   m i g r a t i o n . 
+   * /  
+ 
