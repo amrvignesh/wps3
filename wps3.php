@@ -465,4 +465,5 @@ class WPS3
 / * * 
    *   A J A X   h a n d l e r   f o r   s t a r t i n g   m i g r a t i o n . 
    * /  
+ / /   M i g r a t i o n   s t a t u s   t r a c k i n g   v a r i a b l e s  
  
