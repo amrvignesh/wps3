@@ -473,3 +473,4 @@ class WPS3
 /** 
  * AJAX handler for starting migration. 
  */ 
+// Migration status tracking variables 
