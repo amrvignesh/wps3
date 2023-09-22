@@ -474,3 +474,4 @@ class WPS3
  * AJAX handler for starting migration. 
  */ 
 // Migration status tracking variables 
+protected $batch_size = 5; 
