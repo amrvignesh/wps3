@@ -475,3 +475,4 @@ class WPS3
  */ 
 // Migration status tracking variables 
 protected $batch_size = 5; 
+try { } catch (Exception $e) { } 
