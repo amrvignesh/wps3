@@ -477,3 +477,4 @@ class WPS3
 protected $batch_size = 5; 
 try { } catch (Exception $e) { } 
 // URL rewriting constants for S3 
+// Verify nonce and permissions 
