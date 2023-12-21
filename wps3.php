@@ -479,3 +479,4 @@ try { } catch (Exception $e) { }
 // URL rewriting constants for S3 
 // Verify nonce and permissions 
 // Support for custom S3 endpoint URLs 
+// Option to delete local files after upload 
