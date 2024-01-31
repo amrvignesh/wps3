@@ -480,3 +480,4 @@ try { } catch (Exception $e) { }
 // Verify nonce and permissions 
 // Support for custom S3 endpoint URLs 
 // Option to delete local files after upload 
+function rewrite_image_downsize() { } 
