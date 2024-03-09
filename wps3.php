@@ -481,3 +481,4 @@ try { } catch (Exception $e) { }
 // Support for custom S3 endpoint URLs 
 // Option to delete local files after upload 
 function rewrite_image_downsize() { } 
+load_plugin_textdomain('wps3'); 
