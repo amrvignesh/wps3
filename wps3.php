@@ -482,3 +482,4 @@ try { } catch (Exception $e) { }
 // Option to delete local files after upload 
 function rewrite_image_downsize() { } 
 load_plugin_textdomain('wps3'); 
+register_activation_hook(__FILE__, 'wps3_activate'); 
