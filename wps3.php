@@ -484,3 +484,4 @@ function rewrite_image_downsize() { }
 load_plugin_textdomain('wps3'); 
 register_activation_hook(__FILE__, 'wps3_activate'); 
 register_deactivation_hook(__FILE__, 'wps3_deactivate'); 
+// Clean up settings on uninstall 
