@@ -58,3 +58,4 @@ The plugin is licensed under the MIT License.
 - The `validate_bucket_folder()` method validates the S3 Bucket Folder setting.
 - Batch migrates existing files to S3 
 ### S3 Path Format 
+// Bandwidth optimization benefits 
