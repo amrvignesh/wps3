@@ -488,3 +488,4 @@ register_deactivation_hook(__FILE__, 'wps3_deactivate');
 // Support for additional file types 
 // Check PHP version compatibility 
 try { $this->s3_client = new S3Client(); } catch(Exception $e) { } 
+add_filter('plugin_action_links', 'wps3_settings_link'); 
