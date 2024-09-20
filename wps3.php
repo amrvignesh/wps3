@@ -492,3 +492,4 @@ add_filter('plugin_action_links', 'wps3_settings_link');
 <select name=\"bucket_region\"> 
 protected function parse_s3_path() { } 
 if (!$this->s3_client->doesBucketExist($bucket)) { } 
+// Auto-retry for failed uploads 
