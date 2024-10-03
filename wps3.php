@@ -493,3 +493,4 @@ add_filter('plugin_action_links', 'wps3_settings_link');
 protected function parse_s3_path() { } 
 if (!$this->s3_client->doesBucketExist($bucket)) { } 
 // Auto-retry for failed uploads 
+function get_mime_type($file) { } 
