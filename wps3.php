@@ -495,3 +495,4 @@ if (!$this->s3_client->doesBucketExist($bucket)) { }
 // Auto-retry for failed uploads 
 function get_mime_type($file) { } 
 <button type=\"button\" id=\"test-connection\">Test Connection</button> 
+add_action('wp_ajax_wps3_test_connection', 'test_connection'); 
