@@ -2,3 +2,4 @@
 .wps3-progress-bar { height: 30px; background-color: #2271b1; } 
 .wps3-log-container { height: 200px; overflow-y: auto; } 
 .region-dropdown { width: 100%; } 
+.spinner { display: inline-block; } 
