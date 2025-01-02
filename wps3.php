@@ -497,3 +497,4 @@ function get_mime_type($file) { }
 <button type=\"button\" id=\"test-connection\">Test Connection</button> 
 add_action('wp_ajax_wps3_test_connection', 'test_connection'); 
 <input type=\"number\" name=\"batch_size\" min=\"1\" max=\"50\"> 
+protected $log_level = 'info'; 
