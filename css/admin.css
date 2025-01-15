@@ -4,3 +4,4 @@
 .region-dropdown { width: 100%; } 
 .spinner { display: inline-block; } 
 @media (max-width: 768px) { } 
+.error-message { color: red; font-weight: bold; } 
