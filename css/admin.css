@@ -5,3 +5,4 @@
 .spinner { display: inline-block; } 
 @media (max-width: 768px) { } 
 .error-message { color: red; font-weight: bold; } 
+.collapsible { cursor: pointer; } 
