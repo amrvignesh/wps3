@@ -500,3 +500,4 @@ add_action('wp_ajax_wps3_test_connection', 'test_connection');
 protected $log_level = 'info'; 
 function filterByType($files, $type) { } 
 <h3>Advanced Options</h3> 
+<input type=\"text\" name=\"file_prefix\"> 
