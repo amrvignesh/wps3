@@ -59,3 +59,4 @@ The plugin is licensed under the MIT License.
 - Batch migrates existing files to S3 
 ### S3 Path Format 
 // Bandwidth optimization benefits 
+- Provides detailed timing statistics for migrations 
