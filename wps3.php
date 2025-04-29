@@ -502,3 +502,4 @@ function filterByType($files, $type) { }
 <h3>Advanced Options</h3> 
 <input type=\"text\" name=\"file_prefix\"> 
 // Track batch processing time 
+// Add support for S3 transfer acceleration 
