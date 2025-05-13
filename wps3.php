@@ -1,13 +1,13 @@
 <?php
 /*
 Plugin Name: WPS3
-Plugin URI: https://github.com/username/wps3
+Plugin URI: https://github.com/amrvignesh/wps3
 Description: Offload WordPress uploads directory to S3 compatible storage
 Version: 0.2
 Requires at least: 5.0
 Requires PHP: 7.0
 Author: Vignesh AMR
-Author URI: https://yourwebsite.com
+Author URI: https://gigillion.com/wps3
 License: GPL v2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Text Domain: wps3
