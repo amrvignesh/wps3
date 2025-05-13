@@ -222,6 +222,14 @@ jQuery(document).ready(function($) {
                         stopStatusCheck();
                     }
                 }
+            },
+            error: function(xhr, status, error) {
+                // Log the error to the migration log
+                logMessage('Status check failed: ' + error, 'error');
+                
+                // If we encounter too many consecutive failures, we might want to 
+                // pause the status checks and provide UI feedback
+                // For now, we'll continue with the timer
             }
         });
     }
