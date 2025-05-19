@@ -46,19 +46,14 @@ jQuery(document).ready(function($) {
      * Start the migration process
      */
     function startMigration(reset = false) {
-        $.ajax({
-            url: wps3_ajax.ajax_url,
-            type: 'POST',
-            data: {
-                action: 'wps3_start_migration',
-                nonce: wps3_ajax.nonce,
-                reset: reset
-            },
-            beforeSend: function() {
+        performAjaxRequest(
+            'wps3_start_migration',
+            { reset: reset },
+            function() {
                 $startButton.prop('disabled', true);
                 logMessage('Starting migration...');
             },
-            success: function(response) {
+            function(response) {
                 if (response.success) {
                     logMessage(response.data.message);
                     $startButton.hide();
