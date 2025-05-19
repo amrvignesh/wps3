@@ -176,7 +176,9 @@ jQuery(document).ready(function($) {
                 processingBatch = false;
                 logMessage('AJAX Error: ' + error, 'error');
                 // Retry after a delay
-                setTimeout(processBatch, 5000);
+                if (isMigrationRunning) {
+                    setTimeout(processBatch, 5000);
+                }
             }
         });
     }
