@@ -44,7 +44,7 @@ jQuery(document).ready(function($) {
             data: {
                 action: 'wps3_start_migration',
                 nonce: wps3_ajax.nonce,
-                reset: reset ? 'true' : 'false'
+                reset: reset
             },
             beforeSend: function() {
                 $startButton.prop('disabled', true);
