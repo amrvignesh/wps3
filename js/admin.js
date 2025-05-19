@@ -2,6 +2,8 @@ jQuery(document).ready(function($) {
     const STATUS_CHECK_INTERVAL = 5000; // 5 seconds
     let statusCheckTimer = null;
     let processingBatch = false;
+    let consecutiveFailures = 0;
+    const MAX_CONSECUTIVE_FAILURES = 3;
     
     // DOM Elements
     const $startButton = $('#wps3-start-migration');
@@ -184,6 +186,7 @@ jQuery(document).ready(function($) {
      */
     function startStatusCheck() {
         statusCheckTimer = setInterval(checkStatus, STATUS_CHECK_INTERVAL);
+        consecutiveFailures = 0; // Reset failure counter when starting checks
     }
     
     /**
@@ -193,6 +196,39 @@ jQuery(document).ready(function($) {
         if (statusCheckTimer) {
             clearInterval(statusCheckTimer);
             statusCheckTimer = null;
+        }
+    }
+    
+    /**
+     * Handle consecutive status check failures
+     */
+    function handleConsecutiveFailures() {
+        consecutiveFailures++;
+        
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            logMessage(`Status check failed ${consecutiveFailures} times in a row. Pausing status checks.`, 'error');
+            stopStatusCheck();
+            $pauseButton.hide();
+            $startButton.show().prop('disabled', false);
+            
+            // Show a notification to the user
+            const $notification = $('<div>', {
+                class: 'wps3-notification wps3-notification-error',
+                html: `
+                    <p>Status checks have been paused due to repeated failures.</p>
+                    <p>Please check your server connection and try again.</p>
+                    <button class="button button-primary wps3-resume-checks">Resume Status Checks</button>
+                `
+            });
+            
+            $logContainer.before($notification);
+            
+            // Add event handler for resume button
+            $('.wps3-resume-checks').on('click', function() {
+                $notification.remove();
+                consecutiveFailures = 0;
+                startStatusCheck();
+            });
         }
     }
     
@@ -209,6 +245,9 @@ jQuery(document).ready(function($) {
             },
             success: function(response) {
                 if (response.success) {
+                    // Reset failure counter on successful check
+                    consecutiveFailures = 0;
+                    
                     updateProgress(
                         response.data.percent_complete,
                         response.data.migrated_files,
@@ -221,15 +260,16 @@ jQuery(document).ready(function($) {
                         $startButton.show().prop('disabled', false);
                         stopStatusCheck();
                     }
+                } else {
+                    // Handle unsuccessful response
+                    logMessage('Status check failed: ' + response.data.message, 'error');
+                    handleConsecutiveFailures();
                 }
             },
             error: function(xhr, status, error) {
                 // Log the error to the migration log
                 logMessage('Status check failed: ' + error, 'error');
-                
-                // If we encounter too many consecutive failures, we might want to 
-                // pause the status checks and provide UI feedback
-                // For now, we'll continue with the timer
+                handleConsecutiveFailures();
             }
         });
     }
