@@ -47,7 +47,8 @@ This plugin is licensed under the GNU General Public License v2 or later. See th
    - For custom S3 providers: `s3://my-bucket/wp-uploads?region=us-east-1&endpoint=https://s3.example.com`
 4. Enter your Access Key and Secret Key
 5. Optionally enable "Delete Local Files" to remove local copies after successful S3 upload
-6. Save your settings
+6. (Optional) Enable debug logging by checking "Enable Debug Logging" to help troubleshoot any issues. Debug logs will be written to the WordPress debug log file when WP_DEBUG is enabled.
+7. Save your settings
 
 ### Migration
 1. Go to Media > S3 Migration
