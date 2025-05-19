@@ -2,6 +2,11 @@
 ## S3 Uploads Offloader
 This plugin offloads all WordPress uploads to an S3-compatible storage service while maintaining proper URL references to serve media directly from S3, dramatically reducing your WordPress server's bandwidth usage.
 
+### License
+This plugin is licensed under the GNU General Public License v2 or later. See the [LICENSE](LICENSE) file for the full license text.
+
+> **Note**: This project was previously licensed under the MIT License. The license was changed to GPL v2 or later to better align with WordPress plugin repository requirements and to ensure compatibility with WordPress core, which is also GPL-licensed.
+
 ### Primary Benefits
 - **Bandwidth Reduction**: Media files are served directly from S3 to your visitors, not through your WordPress server
 - **Cost Savings**: Significantly reduces hosting bandwidth costs by offloading large media files to S3
@@ -77,9 +82,6 @@ This direct delivery model is particularly effective for:
 
 ### Support
 If you have any questions or problems with the plugin, please open an issue on GitHub.
-
-### License
-The plugin is licensed under the GPL v2 or later license.
 
 ## Technical Documentation
 
