@@ -217,14 +217,18 @@ jQuery(document).ready(function($) {
                 html: `
                     <p>Status checks have been paused due to repeated failures.</p>
                     <p>Please check your server connection and try again.</p>
-                    <button class="button button-primary wps3-resume-checks">Resume Status Checks</button>
+                    <button class="button button-primary wps3-resume-checks" aria-label="Resume status checks after repeated failures">Resume Status Checks</button>
                 `
             });
             
             $logContainer.before($notification);
             
+            // Add focus to the resume button for accessibility
+            const $resumeButton = $('.wps3-resume-checks');
+            $resumeButton.focus();
+            
             // Add event handler for resume button
-            $('.wps3-resume-checks').on('click', function() {
+            $resumeButton.on('click', function() {
                 $notification.remove();
                 consecutiveFailures = 0;
                 startStatusCheck();
