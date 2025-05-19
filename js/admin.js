@@ -31,7 +31,13 @@ jQuery(document).ready(function($) {
      * Update the progress bar
      */
     function updateProgress(percent, migratedFiles, totalFiles) {
-        $progressBar.css('width', percent + '%');
+        $progressBar.css('width', percent + '%')
+                    .attr({
+                        'role': 'progressbar',
+                        'aria-valuenow': percent,
+                        'aria-valuemin': 0,
+                        'aria-valuemax': 100
+                    });
         $progressText.text(percent + '%');
         $migrationStats.text(`Progress: ${migratedFiles} of ${totalFiles} files migrated`);
     }
