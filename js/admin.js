@@ -15,6 +15,14 @@ jQuery(document).ready(function($) {
     const $migrationStats = $('.wps3-migration-stats p');
     
     /**
+     * Check if migration is currently running
+     * @returns {boolean} True if migration is running
+     */
+    function isMigrationRunning() {
+        return processingBatch || statusCheckTimer !== null;
+    }
+    
+    /**
      * Log a message to the migration log
      */
     function logMessage(message, type = 'info') {
@@ -73,7 +81,7 @@ jQuery(document).ready(function($) {
                 logMessage('AJAX Error: ' + error, 'error');
                 $startButton.prop('disabled', false);
             }
-        });
+        );
     }
     
     /**
@@ -177,7 +185,7 @@ jQuery(document).ready(function($) {
                 processingBatch = false;
                 logMessage('AJAX Error: ' + error, 'error');
                 // Retry after a delay
-                if (isMigrationRunning) {
+                if (isMigrationRunning()) {
                     setTimeout(processBatch, 5000);
                 }
             }
@@ -262,7 +270,7 @@ jQuery(document).ready(function($) {
                     );
                     
                     // If migration is no longer running, update UI
-                    if (!response.data.migration_running && statusCheckTimer) {
+                    if (!response.data.migration_running && isMigrationRunning()) {
                         $pauseButton.hide();
                         $startButton.show().prop('disabled', false);
                         stopStatusCheck();
