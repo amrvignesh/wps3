@@ -27,6 +27,7 @@ define('WPS3_PLUGIN_FILE', __FILE__);
 define('WPS3_MAX_BATCH_SIZE', 10);
 define('WPS3_RETRY_ATTEMPTS', 3);
 define('WPS3_TIMEOUT', 30);
+define('WPS3_PROCESS_BATCH_DELAY', 1000); // Delay between batch processing in milliseconds
 
 require_once 'aws/aws-autoloader.php';
 require_once ABSPATH . 'wp-admin/includes/plugin.php';
@@ -613,6 +614,7 @@ class WPS3 implements S3StorageInterface
 			[
 				'ajax_url' => admin_url('admin-ajax.php'),
 				'nonce' => wp_create_nonce('wps3_ajax_nonce'),
+				'process_batch_delay' => WPS3_PROCESS_BATCH_DELAY,
 			]
 		);
 		
@@ -812,7 +814,7 @@ jQuery(document).ready(function($) {
                         stopStatusCheck();
                     } else {
                         // Process the next batch
-                        setTimeout(processBatch, 1000);
+                        setTimeout(processBatch, wps3_ajax.process_batch_delay);
                     }
                 } else {
                     logMessage('Error: ' + response.data.message, 'error');
@@ -825,7 +827,7 @@ jQuery(document).ready(function($) {
                 processingBatch = false;
                 logMessage('AJAX Error: ' + error, 'error');
                 // Retry after a delay
-                setTimeout(processBatch, 5000);
+                setTimeout(processBatch, wps3_ajax.process_batch_delay * 5); // Use 5x delay for retries
             }
         });
     }
