@@ -24,6 +24,9 @@ define('WPS3_VERSION', '0.2');
 define('WPS3_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WPS3_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WPS3_PLUGIN_FILE', __FILE__);
+define('WPS3_MAX_BATCH_SIZE', 10);
+define('WPS3_RETRY_ATTEMPTS', 3);
+define('WPS3_TIMEOUT', 30);
 
 require_once 'aws/aws-autoloader.php';
 require_once ABSPATH . 'wp-admin/includes/plugin.php';
@@ -31,9 +34,27 @@ require_once ABSPATH . 'wp-admin/includes/file.php';
 require_once ABSPATH . 'wp-admin/includes/image.php';
 
 /**
+ * Interface for S3 storage operations
+ */
+interface S3StorageInterface {
+	public function upload($file, $options = []);
+	public function delete($key);
+	public function getUrl($key);
+	public function exists($key);
+}
+
+/**
+ * Custom exceptions for WPS3
+ */
+class WPS3Exception extends Exception {}
+class ConfigurationException extends WPS3Exception {}
+class FileSizeException extends WPS3Exception {}
+class InvalidUrlException extends WPS3Exception {}
+
+/**
  * The S3 Uploads Offloader class.
  */
-class WPS3
+class WPS3 implements S3StorageInterface
 {
 	/**
 	 * The S3 client.
@@ -1041,217 +1062,133 @@ CSS;
 	}
 	
 	/**
-	 * AJAX handler for starting migration.
-	 *
-	 * @return void
+	 * AJAX handler for starting migration
 	 */
-	public function ajax_start_migration()
-	{
+	public function ajax_start_migration() {
 		// Verify nonce and user permissions
 		if (!check_ajax_referer('wps3_ajax_nonce', 'nonce', false) || !current_user_can('manage_options')) {
-			wp_send_json_error([
-				'message' => __('Security check failed or insufficient permissions.', 'wps3')
-			]);
-			return;
+			wp_send_json_error('Security check failed');
 		}
-		
-		// Reset migration status if requested
-		$reset = isset($_POST['reset']) ? sanitize_text_field($_POST['reset']) : 'false';
-		if ($reset === 'true') {
-			update_option('wps3_migrated_files', 0);
-			update_option('wps3_migration_file_list', []);
-		}
-		
-		// Get list of files to migrate
-		$uploads_dir = wp_upload_dir();
-		$all_files = $this->get_all_files_recursive($uploads_dir['basedir']);
-		
-		// Store the file list for later use
-		update_option('wps3_migration_file_list', $all_files);
-		update_option('wps3_migration_running', true);
-		
-		wp_send_json_success([
-			'total_files' => count($all_files),
-			'migrated_files' => get_option('wps3_migrated_files', 0),
-			'message' => sprintf(
-				/* translators: %d: number of files */
-				_n('Starting migration of %d file', 'Starting migration of %d files', count($all_files), 'wps3'),
-				count($all_files)
-			)
-		]);
-	}
-	
-	/**
-	 * AJAX handler for processing a batch of files.
-	 *
-	 * @return void
-	 */
-	public function ajax_process_batch()
-	{
-		// Verify nonce and user permissions
-		if (!check_ajax_referer('wps3_ajax_nonce', 'nonce', false) || !current_user_can('manage_options')) {
-			wp_send_json_error([
-				'message' => __('Security check failed or insufficient permissions.', 'wps3')
-			]);
-			return;
-		}
-		
-		// Check if migration is running
-		if (!get_option('wps3_migration_running', false)) {
-			wp_send_json_error([
-				'message' => __('Migration is not running.', 'wps3')
-			]);
-			return;
-		}
-		
-		// Get the file list
-		$all_files = get_option('wps3_migration_file_list', []);
-		$migrated_files = absint(get_option('wps3_migrated_files', 0));
-		
-		// Get batch of files to process
-		$batch = array_slice($all_files, $migrated_files, $this->batch_size);
-		
-		if (empty($batch)) {
-			// Migration complete
-			update_option('wps3_migration_running', false);
-			wp_send_json_success([
-				'complete' => true,
-				'total_files' => count($all_files),
-				'migrated_files' => $migrated_files,
-				'message' => __('Migration complete!', 'wps3')
-			]);
-			return;
-		}
-		
-		// Process the batch
-		$success_count = 0;
-		$error_files = [];
-		
-		foreach ($batch as $file_path) {
-			try {
-				$result = $this->upload_file($file_path);
-				if ($result) {
-					$success_count++;
-				} else {
-					$error_files[] = [
-						'path' => $file_path,
-						'error' => __('Upload failed', 'wps3')
-					];
-				}
-			} catch (\Exception $e) {
-				$error_files[] = [
-					'path' => $file_path,
-					'error' => $e->getMessage()
-				];
+
+		try {
+			// Validate configuration
+			$this->validate_configuration();
+
+			// Reset migration status if requested
+			$reset = isset($_POST['reset']) ? sanitize_text_field($_POST['reset']) : 'false';
+			if ($reset === 'true') {
+				update_option('wps3_migration_position', 0);
+				update_option('wps3_migration_status', 'in_progress');
+				delete_transient('wps3_migration_progress');
 			}
-		}
-		
-		// Update progress
-		$new_migrated_count = $migrated_files + $success_count;
-		update_option('wps3_migrated_files', $new_migrated_count);
-		
-		wp_send_json_success([
-			'complete' => false,
-			'total_files' => count($all_files),
-			'migrated_files' => $new_migrated_count,
-			'percent_complete' => round(($new_migrated_count / count($all_files)) * 100),
-			'success_count' => $success_count,
-			'error_count' => count($error_files),
-			'errors' => $error_files,
-			'message' => sprintf(
-				/* translators: %1$d: total files processed, %2$d: successful uploads, %3$d: failed uploads */
-				__('Processed %1$d files (%2$d successful, %3$d failed)', 'wps3'), 
-				count($batch), 
-				$success_count, 
-				count($error_files)
-			)
-		]);
-	}
-	
-	/**
-	 * AJAX handler for getting migration status.
-	 *
-	 * @return void
-	 */
-	public function ajax_get_migration_status()
-	{
-		// Verify nonce and user permissions
-		if (!check_ajax_referer('wps3_ajax_nonce', 'nonce', false) || !current_user_can('manage_options')) {
-			wp_send_json_error([
-				'message' => __('Security check failed or insufficient permissions.', 'wps3')
-			]);
-			return;
-		}
-		
-		$all_files = get_option('wps3_migration_file_list', []);
-		$migrated_files = absint(get_option('wps3_migrated_files', 0));
-		$migration_running = (bool) get_option('wps3_migration_running', false);
-		$total_files = count($all_files);
-		
-		wp_send_json_success([
-			'total_files' => $total_files,
-			'migrated_files' => $migrated_files,
-			'percent_complete' => $total_files > 0 ? round(($migrated_files / $total_files) * 100) : 0,
-			'migration_running' => $migration_running
-		]);
-	}
-	
-	/**
-	 * AJAX handler for updating options.
-	 *
-	 * @return void
-	 */
-	public function ajax_update_option()
-	{
-		// Verify nonce and user permissions
-		if (!check_ajax_referer('wps3_ajax_nonce', 'nonce', false) || !current_user_can('manage_options')) {
-			wp_send_json_error([
-				'message' => __('Security check failed or insufficient permissions.', 'wps3')
-			]);
-			return;
-		}
-		
-		$option_name = isset($_POST['option_name']) ? sanitize_key($_POST['option_name']) : '';
-		$option_value = isset($_POST['option_value']) ? sanitize_text_field($_POST['option_value']) : '';
-		
-		// Only allow updating specific options related to migration
-		$allowed_options = [
-			'wps3_migration_running',
-			'wps3_migrated_files',
-		];
-		
-		if (!in_array($option_name, $allowed_options, true)) {
-			wp_send_json_error([
-				'message' => __('Option not allowed.', 'wps3')
-			]);
-			return;
-		}
-		
-		// For boolean values
-		if ($option_value === 'true') {
-			$option_value = true;
-		} elseif ($option_value === 'false') {
-			$option_value = false;
-		}
-		
-		$result = update_option($option_name, $option_value);
-		
-		if ($result) {
+
+			// Start migration
+			$result = $this->process_batch(0);
+			if (is_wp_error($result)) {
+				$recovery_result = $this->recover_from_error($result);
+				if (is_wp_error($recovery_result)) {
+					wp_send_json_error($recovery_result->get_error_message());
+				}
+			}
+
 			wp_send_json_success([
-				'message' => sprintf(
-					/* translators: %s: option name */
-					__('Option %s updated.', 'wps3'),
-					$option_name
-				)
+				'status' => get_option('wps3_migration_status'),
+				'position' => get_option('wps3_migration_position'),
+				'progress' => get_transient('wps3_migration_progress')
 			]);
-		} else {
-			wp_send_json_error([
-				'message' => sprintf(
-					/* translators: %s: option name */
-					__('Failed to update option %s.', 'wps3'),
-					$option_name
-				)
+		} catch (\Exception $e) {
+			error_log('WPS3: Migration start error: ' . $e->getMessage());
+			wp_send_json_error($e->getMessage());
+		}
+	}
+
+	/**
+	 * AJAX handler for processing a batch
+	 */
+	public function ajax_process_batch() {
+		// Verify nonce and user permissions
+		if (!check_ajax_referer('wps3_ajax_nonce', 'nonce', false) || !current_user_can('manage_options')) {
+			wp_send_json_error('Security check failed');
+		}
+
+		try {
+			$position = get_option('wps3_migration_position');
+			$result = $this->process_batch($position);
+			
+			if (is_wp_error($result)) {
+				$recovery_result = $this->recover_from_error($result);
+				if (is_wp_error($recovery_result)) {
+					wp_send_json_error($recovery_result->get_error_message());
+				}
+			}
+
+			wp_send_json_success([
+				'status' => get_option('wps3_migration_status'),
+				'position' => get_option('wps3_migration_position'),
+				'progress' => get_transient('wps3_migration_progress')
 			]);
+		} catch (\Exception $e) {
+			error_log('WPS3: Batch processing error: ' . $e->getMessage());
+			wp_send_json_error($e->getMessage());
+		}
+	}
+
+	/**
+	 * AJAX handler for getting migration status
+	 */
+	public function ajax_get_migration_status() {
+		// Verify nonce and user permissions
+		if (!check_ajax_referer('wps3_ajax_nonce', 'nonce', false) || !current_user_can('manage_options')) {
+			wp_send_json_error('Security check failed');
+		}
+
+		try {
+			wp_send_json_success([
+				'status' => get_option('wps3_migration_status'),
+				'position' => get_option('wps3_migration_position'),
+				'progress' => get_transient('wps3_migration_progress')
+			]);
+		} catch (\Exception $e) {
+			error_log('WPS3: Status check error: ' . $e->getMessage());
+			wp_send_json_error($e->getMessage());
+		}
+	}
+
+	/**
+	 * AJAX handler for updating options
+	 */
+	public function ajax_update_option() {
+		// Verify nonce and user permissions
+		if (!check_ajax_referer('wps3_ajax_nonce', 'nonce', false) || !current_user_can('manage_options')) {
+			wp_send_json_error('Security check failed');
+		}
+
+		try {
+			$option_name = isset($_POST['option_name']) ? sanitize_key($_POST['option_name']) : '';
+			$option_value = isset($_POST['option_value']) ? sanitize_text_field($_POST['option_value']) : '';
+
+			if (empty($option_name)) {
+				throw new \Exception('Option name is required');
+			}
+
+			// Validate option value based on option name
+			switch ($option_name) {
+				case 'wps3_s3_path':
+					$this->validate_s3_path($option_value);
+					break;
+				case 'wps3_access_key':
+				case 'wps3_secret_key':
+					if (empty($option_value)) {
+						throw new \Exception('Access and secret keys are required');
+					}
+					break;
+			}
+
+			update_option($option_name, $option_value);
+			wp_send_json_success();
+		} catch (\Exception $e) {
+			error_log('WPS3: Option update error: ' . $e->getMessage());
+			wp_send_json_error($e->getMessage());
 		}
 	}
 
@@ -1454,6 +1391,288 @@ CSS;
 					$this->upload_file($size_file_path);
 				}
 			}
+		}
+	}
+
+	/**
+	 * Validate the plugin configuration
+	 *
+	 * @throws ConfigurationException If configuration is invalid
+	 */
+	private function validate_configuration() {
+		$required = ['bucket_name', 'bucket_region', 's3_client'];
+		foreach ($required as $field) {
+			if (empty($this->$field)) {
+				throw new ConfigurationException("Missing required field: $field");
+			}
+		}
+	}
+
+	/**
+	 * Validate file size before upload
+	 *
+	 * @param string $file_path Path to the file
+	 * @throws FileSizeException If file is too large
+	 */
+	private function validate_file_size($file_path) {
+		$max_size = wp_max_upload_size();
+		if (filesize($file_path) > $max_size) {
+			throw new FileSizeException("File exceeds maximum allowed size of " . size_format($max_size));
+		}
+	}
+
+	/**
+	 * Validate URL format
+	 *
+	 * @param string $url URL to validate
+	 * @throws InvalidUrlException If URL is invalid
+	 */
+	private function validate_url($url) {
+		if (!filter_var($url, FILTER_VALIDATE_URL)) {
+			throw new InvalidUrlException("Invalid URL format: $url");
+		}
+	}
+
+	/**
+	 * Upload a file to S3 storage
+	 *
+	 * @param string $file Path to the file to upload
+	 * @param array $options Additional upload options
+	 * @return bool|WP_Error True on success, WP_Error on failure
+	 * @throws S3Exception If S3 upload fails
+	 */
+	public function upload($file, $options = []) {
+		try {
+			// Validate file
+			if (!file_exists($file)) {
+				return new WP_Error('file_not_found', 'File does not exist');
+			}
+
+			// Validate file size
+			$this->validate_file_size($file);
+
+			// Get file info
+			$file_info = wp_check_filetype(basename($file));
+			if (!$file_info['type']) {
+				return new WP_Error('invalid_file_type', 'Invalid file type');
+			}
+
+			// Prepare upload
+			$key = $this->bucket_folder . '/' . basename($file);
+			
+			// Add hooks
+			do_action('wps3_before_upload', $file);
+
+			// Upload to S3
+			$result = $this->s3_client->putObject([
+				'Bucket' => $this->bucket_name,
+				'Key' => $key,
+				'Body' => file_get_contents($file),
+				'ContentType' => $file_info['type'],
+				'ACL' => 'public-read',
+			]);
+
+			// Delete local file if enabled
+			if (get_option('wps3_delete_local')) {
+				@unlink($file);
+			}
+
+			do_action('wps3_after_upload', $file, $result);
+
+			return true;
+		} catch (\Aws\S3\Exception\S3Exception $e) {
+			error_log('WPS3: S3 specific error: ' . $e->getMessage());
+			return new WP_Error('s3_error', $e->getMessage());
+		} catch (FileSizeException $e) {
+			error_log('WPS3: File size error: ' . $e->getMessage());
+			return new WP_Error('file_size_error', $e->getMessage());
+		} catch (\Exception $e) {
+			error_log('WPS3: General error: ' . $e->getMessage());
+			return new WP_Error('general_error', $e->getMessage());
+		}
+	}
+
+	/**
+	 * Delete a file from S3 storage
+	 *
+	 * @param string $key The S3 object key
+	 * @return bool|WP_Error True on success, WP_Error on failure
+	 */
+	public function delete($key) {
+		try {
+			$this->s3_client->deleteObject([
+				'Bucket' => $this->bucket_name,
+				'Key' => $key
+			]);
+			return true;
+		} catch (\Exception $e) {
+			error_log('WPS3: Delete error: ' . $e->getMessage());
+			return new WP_Error('delete_error', $e->getMessage());
+		}
+	}
+
+	/**
+	 * Get the URL for an S3 object
+	 *
+	 * @param string $key The S3 object key
+	 * @return string|WP_Error The URL or WP_Error on failure
+	 */
+	public function getUrl($key) {
+		try {
+			$this->validate_url($key);
+			return $this->s3_client->getObjectUrl($this->bucket_name, $key);
+		} catch (\Exception $e) {
+			error_log('WPS3: URL generation error: ' . $e->getMessage());
+			return new WP_Error('url_error', $e->getMessage());
+		}
+	}
+
+	/**
+	 * Check if an object exists in S3
+	 *
+	 * @param string $key The S3 object key
+	 * @return bool Whether the object exists
+	 */
+	public function exists($key) {
+		try {
+			return $this->s3_client->doesObjectExist($this->bucket_name, $key);
+		} catch (\Exception $e) {
+			error_log('WPS3: Existence check error: ' . $e->getMessage());
+			return false;
+		}
+	}
+
+	/**
+	 * Get cached bucket information
+	 *
+	 * @return array|false Bucket information or false if not cached
+	 */
+	private function get_cached_bucket_info() {
+		$cache_key = 'wps3_bucket_info';
+		$cached = wp_cache_get($cache_key);
+		if (false === $cached) {
+			try {
+				$info = $this->s3_client->getBucketInfo();
+				wp_cache_set($cache_key, $info, '', 3600);
+				return $info;
+			} catch (\Exception $e) {
+				error_log('WPS3: Error getting bucket info: ' . $e->getMessage());
+				return false;
+			}
+		}
+		return $cached;
+	}
+
+	/**
+	 * Resume a paused migration
+	 *
+	 * @return bool|WP_Error True on success, WP_Error on failure
+	 */
+	public function resume_migration() {
+		try {
+			$last_position = get_option('wps3_migration_position');
+			if (!$last_position) {
+				return new WP_Error('no_resume_point', 'No migration to resume');
+			}
+
+			$status = get_option('wps3_migration_status');
+			if ($status !== 'paused') {
+				return new WP_Error('invalid_status', 'Migration is not paused');
+			}
+
+			return $this->process_batch($last_position);
+		} catch (\Exception $e) {
+			error_log('WPS3: Migration resume error: ' . $e->getMessage());
+			return new WP_Error('resume_error', $e->getMessage());
+		}
+	}
+
+	/**
+	 * Process a batch of files for migration
+	 *
+	 * @param int $start_position Starting position in the file list
+	 * @return bool|WP_Error True on success, WP_Error on failure
+	 */
+	protected function process_batch($start_position) {
+		try {
+			$files = $this->get_all_files_recursive(wp_upload_dir()['path']);
+			$total_files = count($files);
+			$batch_size = WPS3_MAX_BATCH_SIZE;
+			$end_position = min($start_position + $batch_size, $total_files);
+
+			for ($i = $start_position; $i < $end_position; $i++) {
+				$file = $files[$i];
+				$result = $this->upload($file);
+				
+				if (is_wp_error($result)) {
+					// Log error but continue with next file
+					error_log('WPS3: Error uploading file ' . $file . ': ' . $result->get_error_message());
+					continue;
+				}
+
+				// Update progress
+				$progress = ($i + 1) / $total_files * 100;
+				set_transient('wps3_migration_progress', $progress, HOUR_IN_SECONDS);
+			}
+
+			// Update position
+			if ($end_position < $total_files) {
+				update_option('wps3_migration_position', $end_position);
+				update_option('wps3_migration_status', 'in_progress');
+			} else {
+				update_option('wps3_migration_position', 0);
+				update_option('wps3_migration_status', 'completed');
+				delete_transient('wps3_migration_progress');
+			}
+
+			return true;
+		} catch (\Exception $e) {
+			error_log('WPS3: Batch processing error: ' . $e->getMessage());
+			return new WP_Error('batch_error', $e->getMessage());
+		}
+	}
+
+	/**
+	 * Recover from an error during migration
+	 *
+	 * @param WP_Error $error The error to recover from
+	 * @return bool|WP_Error True on success, WP_Error on failure
+	 */
+	public function recover_from_error($error) {
+		try {
+			$error_code = $error->get_error_code();
+			$error_message = $error->get_error_message();
+
+			// Log the error
+			error_log('WPS3: Recovery from error: ' . $error_code . ' - ' . $error_message);
+
+			switch ($error_code) {
+				case 's3_error':
+					// Check S3 connection
+					$this->validate_configuration();
+					break;
+
+				case 'file_size_error':
+					// Skip the problematic file and continue
+					$position = get_option('wps3_migration_position');
+					update_option('wps3_migration_position', $position + 1);
+					break;
+
+				case 'general_error':
+					// Pause migration for manual review
+					update_option('wps3_migration_status', 'paused');
+					break;
+
+				default:
+					// Unknown error, pause migration
+					update_option('wps3_migration_status', 'paused');
+					return new WP_Error('unknown_error', 'Unknown error type: ' . $error_code);
+			}
+
+			return true;
+		} catch (\Exception $e) {
+			error_log('WPS3: Error recovery failed: ' . $e->getMessage());
+			return new WP_Error('recovery_failed', $e->getMessage());
 		}
 	}
 }
