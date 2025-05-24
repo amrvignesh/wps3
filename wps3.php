@@ -684,6 +684,7 @@ jQuery(document).ready(function($) {
     function updateProgress(percent, migratedFiles, totalFiles) {
         $progressBar.css('width', percent + '%');
         $progressText.text(percent + '%');
+        $progressBarContainer.attr('aria-valuenow', percent);
         $migrationStats.text(`Progress: ${migratedFiles} of ${totalFiles} files migrated`);
     }
     
@@ -989,13 +990,13 @@ CSS;
 			<h1><?php _e('S3 Migration Status', 'wps3'); ?></h1>
 			
 			<div class="wps3-migration-status">
-				<div class="wps3-progress-bar-container">
+				<div class="wps3-progress-bar-container" role="progressbar" aria-valuenow="<?php echo esc_attr($percent_complete); ?>" aria-valuemin="0" aria-valuemax="100" aria-label="<?php esc_attr_e('Migration Progress', 'wps3'); ?>">
 					<div class="wps3-progress-bar" style="width: <?php echo esc_attr($percent_complete); ?>%;">
 						<span><?php echo esc_html($percent_complete); ?>%</span>
 					</div>
 				</div>
 				
-				<div class="wps3-migration-stats">
+				<div class="wps3-migration-stats" aria-live="polite">
 					<p>
 						<?php printf(
 							__('Progress: %1$d of %2$d files migrated', 'wps3'),
@@ -1007,21 +1008,21 @@ CSS;
 				
 				<div class="wps3-migration-controls">
 					<?php if ($migration_running): ?>
-						<button type="button" id="wps3-pause-migration" class="button button-primary">
+						<button type="button" id="wps3-pause-migration" class="button button-primary" aria-label="<?php esc_attr_e('Pause the migration process', 'wps3'); ?>">
 							<?php _e('Pause Migration', 'wps3'); ?>
 						</button>
 					<?php else: ?>
-						<button type="button" id="wps3-start-migration" class="button button-primary">
+						<button type="button" id="wps3-start-migration" class="button button-primary" aria-label="<?php esc_attr_e('Start the migration process', 'wps3'); ?>">
 							<?php _e('Start Migration', 'wps3'); ?>
 						</button>
 					<?php endif; ?>
 					
-					<button type="button" id="wps3-reset-migration" class="button">
+					<button type="button" id="wps3-reset-migration" class="button" aria-label="<?php esc_attr_e('Reset the migration progress and start over', 'wps3'); ?>">
 						<?php _e('Reset Migration', 'wps3'); ?>
 					</button>
 				</div>
 				
-				<div class="wps3-migration-log">
+				<div class="wps3-migration-log" aria-live="polite">
 					<h3><?php _e('Migration Log', 'wps3'); ?></h3>
 					<div id="wps3-log-container"></div>
 				</div>
