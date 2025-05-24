@@ -189,6 +189,7 @@ class WPS3 implements S3StorageInterface
 		add_action('wp_ajax_wps3_process_batch', [$this, 'ajax_process_batch']);
 		add_action('wp_ajax_wps3_get_migration_status', [$this, 'ajax_get_migration_status']);
 		add_action('wp_ajax_wps3_update_option', [$this, 'ajax_update_option']);
+		add_action('wp_ajax_wps3_pause_migration', [$this, 'ajax_pause_migration']);
 		
 		// Filters for rewriting URLs
 		add_filter('wp_get_attachment_url', [$this, 'rewrite_attachment_url'], 10, 2);
@@ -823,25 +824,20 @@ jQuery(document).ready(function($) {
             url: wps3_ajax.ajax_url,
             type: 'POST',
             data: {
-                action: 'wps3_get_migration_status',
+                action: 'wps3_pause_migration',
                 nonce: wps3_ajax.nonce
             },
             success: function(response) {
                 if (response.success) {
-                    if (response.data.migration_running) {
-                        // Update option via AJAX
-                        $.post(wps3_ajax.ajax_url, {
-                            action: 'wps3_update_option',
-                            nonce: wps3_ajax.nonce,
-                            option_name: 'wps3_migration_running',
-                            option_value: false
-                        });
-                    }
-                    
                     $pauseButton.hide();
                     $startButton.show().prop('disabled', false);
                     logMessage('Migration paused');
+                } else {
+                    logMessage('Error: ' + response.data, 'error');
                 }
+            },
+            error: function(xhr, status, error) {
+                logMessage('AJAX Error: ' + error, 'error');
             }
         });
     }
@@ -1291,6 +1287,38 @@ CSS;
 			wp_send_json_success();
 		} catch (\Exception $e) {
 			error_log('WPS3: Option update error: ' . $e->getMessage());
+			wp_send_json_error($e->getMessage());
+		}
+	}
+
+	/**
+	 * AJAX handler for pausing migration
+	 */
+	public function ajax_pause_migration() {
+		// Verify nonce and user permissions
+		if (!check_ajax_referer('wps3_ajax_nonce', 'nonce', false) || !current_user_can('manage_options')) {
+			wp_send_json_error('Security check failed');
+		}
+
+		try {
+			$status = get_option('wps3_migration_status');
+			if ($status !== 'in_progress') {
+				wp_send_json_error('Migration is not in progress');
+				return;
+			}
+
+			// Update migration status
+			update_option('wps3_migration_status', 'paused');
+			$this->add_log_entry('Migration paused', 'info');
+
+			wp_send_json_success([
+				'status' => 'paused',
+				'position' => get_option('wps3_migration_position'),
+				'progress' => get_transient('wps3_migration_progress')
+			]);
+		} catch (\Exception $e) {
+			$this->add_log_entry('Error pausing migration: ' . $e->getMessage(), 'error');
+			error_log('WPS3: Pause migration error: ' . $e->getMessage());
 			wp_send_json_error($e->getMessage());
 		}
 	}
