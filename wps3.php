@@ -15,19 +15,19 @@ Domain Path: /languages
 */
 
 // Exit if accessed directly.
-if (!defined('ABSPATH')) {
+if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
 // Define plugin constants
-define('WPS3_VERSION', '0.2');
-define('WPS3_PLUGIN_DIR', plugin_dir_path(__FILE__));
-define('WPS3_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('WPS3_PLUGIN_FILE', __FILE__);
-define('WPS3_MAX_BATCH_SIZE', 10);
-define('WPS3_RETRY_ATTEMPTS', 3);
-define('WPS3_TIMEOUT', 30);
-define('WPS3_PROCESS_BATCH_DELAY', 1000); // Delay between batch processing in milliseconds
+define( 'WPS3_VERSION', '0.2' );
+define( 'WPS3_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
+define( 'WPS3_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
+define( 'WPS3_PLUGIN_FILE', __FILE__ );
+define( 'WPS3_MAX_BATCH_SIZE', 10 );
+define( 'WPS3_RETRY_ATTEMPTS', 3 );
+define( 'WPS3_TIMEOUT', 30 );
+define( 'WPS3_PROCESS_BATCH_DELAY', 1000 ); // Delay between batch processing in milliseconds
 
 require_once 'aws/aws-autoloader.php';
 require_once ABSPATH . 'wp-admin/includes/plugin.php';
@@ -38,10 +38,38 @@ require_once ABSPATH . 'wp-admin/includes/image.php';
  * Interface for S3 storage operations
  */
 interface S3StorageInterface {
-	public function upload($file, $options = []);
-	public function delete($key);
-	public function getUrl($key);
-	public function exists($key);
+	/**
+	 * Upload a file to S3 storage
+	 *
+	 * @param string $file Path to the file to upload
+	 * @param array  $options Additional upload options
+	 * @return bool|WP_Error True on success, WP_Error on failure
+	 */
+	public function upload( $file, $options = array() );
+
+	/**
+	 * Delete a file from S3 storage
+	 *
+	 * @param string $key The S3 object key
+	 * @return bool|WP_Error True on success, WP_Error on failure
+	 */
+	public function delete( $key );
+
+	/**
+	 * Get the URL for an S3 object
+	 *
+	 * @param string $key The S3 object key
+	 * @return string|WP_Error The URL or WP_Error on failure
+	 */
+	public function getUrl( $key );
+
+	/**
+	 * Check if an object exists in S3
+	 *
+	 * @param string $key The S3 object key
+	 * @return bool Whether the object exists
+	 */
+	public function exists( $key );
 }
 
 /**
@@ -55,8 +83,7 @@ class InvalidUrlException extends WPS3Exception {}
 /**
  * The S3 Uploads Offloader class.
  */
-class WPS3 implements S3StorageInterface
-{
+class WPS3 implements S3StorageInterface {
 	/**
 	 * The S3 client.
 	 *
@@ -102,32 +129,31 @@ class WPS3 implements S3StorageInterface
 	/**
 	 * The constructor.
 	 */
-	public function __construct()
-	{
+	public function __construct() {
 		// Parse the S3 path into components
-		$this->parse_s3_path(get_option('wps3_s3_path'));
+		$this->parse_s3_path( get_option( 'wps3_s3_path' ) );
 
 		// Initialize S3 client if we have the necessary configuration
-		if (!empty($this->bucket_region)) {
-			$config = [
-				'version' => 'latest',
-				'region' => $this->bucket_region,
-				'credentials' => [
-					'key' => get_option('wps3_access_key'),
-					'secret' => get_option('wps3_secret_key')
-				]
-			];
+		if ( ! empty( $this->bucket_region ) ) {
+			$config = array(
+				'version'     => 'latest',
+				'region'      => $this->bucket_region,
+				'credentials' => array(
+					'key'    => get_option( 'wps3_access_key' ),
+					'secret' => get_option( 'wps3_secret_key' ),
+				),
+			);
 
 			// Add custom endpoint if provided
-			if (!empty($this->endpoint)) {
+			if ( ! empty( $this->endpoint ) ) {
 				$config['endpoint'] = $this->endpoint;
 			}
 
 			try {
-				$this->s3_client = new \Aws\S3\S3Client($config);
-			} catch (\Exception $e) {
+				$this->s3_client = new \Aws\S3\S3Client( $config );
+			} catch ( \Exception $e ) {
 				// Log the error but don't crash
-				error_log('WPS3: Error initializing S3 client: ' . $e->getMessage());
+				error_log( 'WPS3: Error initializing S3 client: ' . $e->getMessage() );
 			}
 		}
 	}
@@ -1918,6 +1944,13 @@ CSS;
 function register_wps3() {
 	$wps3 = new WPS3();
 	$wps3->register_hooks();
+	
+	// Add Settings link to plugins page
+	add_filter( 'plugin_action_links_' . plugin_basename( WPS3_PLUGIN_FILE ), function( $links ) {
+		$settings_link = '<a href="' . admin_url( 'options-general.php?page=wps3-settings' ) . '">' . __( 'Settings', 'wps3' ) . '</a>';
+		array_unshift( $links, $settings_link );
+		return $links;
+	});
 }
 
 // Initialize the plugin when WordPress is loaded.
