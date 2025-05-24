@@ -120,6 +120,13 @@ class WPS3 implements S3StorageInterface {
 	protected $endpoint;
 
 	/**
+	 * The URL format for the S3 provider
+	 * 
+	 * @var string
+	 */
+	protected $url_format;
+
+	/**
 	 * The batch size for file migration
 	 * 
 	 * @var int
@@ -147,6 +154,8 @@ class WPS3 implements S3StorageInterface {
 			// Add custom endpoint if provided
 			if ( ! empty( $this->endpoint ) ) {
 				$config['endpoint'] = $this->endpoint;
+				// Set URL format based on endpoint
+				$this->url_format = $this->determine_url_format( $this->endpoint );
 			}
 
 			try {
@@ -1695,13 +1704,17 @@ CSS;
 	 * @param string $key The S3 object key
 	 * @return string|WP_Error The URL or WP_Error on failure
 	 */
-	public function getUrl($key) {
+	public function getUrl( $key ) {
 		try {
-			$this->validate_url($key);
-			return $this->s3_client->getObjectUrl($this->bucket_name, $key);
-		} catch (\Exception $e) {
-			error_log('WPS3: URL generation error: ' . $e->getMessage());
-			return new WP_Error('url_error', $e->getMessage());
+			$this->validate_url( $key );
+			
+			// Allow URL format to be filtered
+			$url = apply_filters( 'wps3_file_url', $this->generate_object_url( $key ), $key, $this->bucket_name, $this->bucket_region );
+			
+			return esc_url( $url );
+		} catch ( \Exception $e ) {
+			error_log( 'WPS3: URL generation error: ' . $e->getMessage() );
+			return new WP_Error( 'url_error', $e->getMessage() );
 		}
 	}
 
@@ -1933,6 +1946,84 @@ CSS;
 		
 		$table_name = $wpdb->prefix . 'wps3_logs';
 		$wpdb->query("TRUNCATE TABLE $table_name");
+	}
+
+	/**
+	 * Determine the URL format based on the endpoint
+	 *
+	 * @param string $endpoint The S3 endpoint URL
+	 * @return string The URL format
+	 */
+	protected function determine_url_format( $endpoint ) {
+		// Check for known providers
+		if ( strpos( $endpoint, 'telnyxstorage.com' ) !== false ) {
+			return 'telnyx';
+		} elseif ( strpos( $endpoint, 'digitaloceanspaces.com' ) !== false ) {
+			return 'digitalocean';
+		} elseif ( strpos( $endpoint, 'backblazeb2.com' ) !== false ) {
+			return 'backblaze';
+		} elseif ( strpos( $endpoint, 'wasabisys.com' ) !== false ) {
+			return 'wasabi';
+		}
+		
+		// Default to standard S3 format
+		return 'standard';
+	}
+
+	/**
+	 * Generate the URL for an S3 object based on the provider's format
+	 *
+	 * @param string $key The S3 object key
+	 * @return string The generated URL
+	 */
+	protected function generate_object_url( $key ) {
+		switch ( $this->url_format ) {
+			case 'telnyx':
+				// Telnyx format: https://region.telnyxstorage.com/bucket/key
+				return sprintf(
+					'https://%s.telnyxstorage.com/%s/%s',
+					$this->bucket_region,
+					$this->bucket_name,
+					$key
+				);
+
+			case 'digitalocean':
+				// DigitalOcean format: https://region.digitaloceanspaces.com/bucket/key
+				return sprintf(
+					'https://%s.digitaloceanspaces.com/%s/%s',
+					$this->bucket_region,
+					$this->bucket_name,
+					$key
+				);
+
+			case 'backblaze':
+				// Backblaze format: https://s3.region.backblazeb2.com/bucket/key
+				return sprintf(
+					'https://s3.%s.backblazeb2.com/%s/%s',
+					$this->bucket_region,
+					$this->bucket_name,
+					$key
+				);
+
+			case 'wasabi':
+				// Wasabi format: https://bucket.s3.region.wasabisys.com/key
+				return sprintf(
+					'https://%s.s3.%s.wasabisys.com/%s',
+					$this->bucket_name,
+					$this->bucket_region,
+					$key
+				);
+
+			case 'standard':
+			default:
+				// Standard AWS S3 format: https://bucket.s3.region.amazonaws.com/key
+				return sprintf(
+					'https://%s.s3.%s.amazonaws.com/%s',
+					$this->bucket_name,
+					$this->bucket_region,
+					$key
+				);
+		}
 	}
 }
 

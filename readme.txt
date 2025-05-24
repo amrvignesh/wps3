@@ -23,6 +23,7 @@ WPS3 is a WordPress plugin that allows you to offload your media uploads to any 
 * Progress tracking and logging
 * Error handling and recovery
 * Batch processing for large migrations
+* Support for custom URL formats for different providers
 
 = Requirements =
 
@@ -47,6 +48,7 @@ The plugin supports any service that is compatible with the S3 API, including:
 * MinIO
 * Backblaze B2
 * Wasabi
+* Telnyx Storage
 * And more...
 
 = Do I need to keep local files? =
@@ -56,6 +58,17 @@ You can choose to delete local files after they are uploaded to S3. This is conf
 = How do I migrate existing files? =
 
 Use the S3 Migration tool under the Media menu to migrate your existing files to S3.
+
+= How are custom URL formats handled? =
+
+The plugin automatically detects and handles different URL formats for various S3-compatible providers. For example:
+* Telnyx: `https://region.telnyxstorage.com/bucket/key`
+* DigitalOcean: `https://region.digitaloceanspaces.com/bucket/key`
+* Backblaze: `https://s3.region.backblazeb2.com/bucket/key`
+* Wasabi: `https://bucket.s3.region.wasabisys.com/key`
+* Standard S3: `https://bucket.s3.region.amazonaws.com/key`
+
+You can also customize the URL format using the `wps3_file_url` filter.
 
 == Screenshots ==
 
@@ -71,6 +84,7 @@ Use the S3 Migration tool under the Media menu to migrate your existing files to
 * Added error handling
 * Added logging system
 * Added batch processing
+* Added support for custom URL formats
 
 = 0.1 =
 * Initial release
@@ -78,7 +92,7 @@ Use the S3 Migration tool under the Media menu to migrate your existing files to
 == Upgrade Notice ==
 
 = 0.2 =
-This version adds a migration tool, progress tracking, and improved error handling.
+This version adds a migration tool, progress tracking, improved error handling, and support for custom URL formats.
 
 == Developer Documentation ==
 
@@ -92,4 +106,10 @@ The plugin provides several hooks for developers:
 = Filters =
 
 * `wps3_upload_options` - Modify upload options before sending to S3
-* `wps3_file_url` - Modify the URL of a file stored in S3 
+* `wps3_file_url` - Modify the URL of a file stored in S3
+  ```php
+  add_filter( 'wps3_file_url', function( $url, $key, $bucket, $region ) {
+      // Custom URL format logic
+      return $url;
+  }, 10, 4 );
+  ``` 
