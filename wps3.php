@@ -653,8 +653,11 @@ class WPS3 implements S3StorageInterface
 		$js_content = <<<'JS'
 jQuery(document).ready(function($) {
     const STATUS_CHECK_INTERVAL = 5000; // 5 seconds
+    const MAX_LOG_ENTRIES = 100; // Maximum number of log entries to keep
     let statusCheckTimer = null;
     let processingBatch = false;
+    let logFragment = null;
+    let logUpdateTimeout = null;
     
     // DOM Elements
     const $startButton = $('#wps3-start-migration');
@@ -666,6 +669,30 @@ jQuery(document).ready(function($) {
     const $migrationStats = $('.wps3-migration-stats p');
     
     /**
+     * Initialize a new log fragment
+     */
+    function initLogFragment() {
+        logFragment = document.createDocumentFragment();
+    }
+    
+    /**
+     * Flush the log fragment to the DOM
+     */
+    function flushLogFragment() {
+        if (logFragment && logFragment.children.length > 0) {
+            $logContainer.append(logFragment);
+            
+            // Remove excess entries if we're over the limit
+            const $entries = $logContainer.children();
+            if ($entries.length > MAX_LOG_ENTRIES) {
+                $entries.slice(0, $entries.length - MAX_LOG_ENTRIES).remove();
+            }
+            
+            logFragment = null;
+        }
+    }
+    
+    /**
      * Log a message to the migration log
      */
     function logMessage(message, type = 'info') {
@@ -675,7 +702,61 @@ jQuery(document).ready(function($) {
             text: `[${timestamp}] ${message}`
         });
         
-        $logContainer.prepend($entry);
+        // Initialize fragment if needed
+        if (!logFragment) {
+            initLogFragment();
+        }
+        
+        // Add entry to fragment
+        logFragment.appendChild($entry[0]);
+        
+        // Clear any existing timeout
+        if (logUpdateTimeout) {
+            clearTimeout(logUpdateTimeout);
+        }
+        
+        // Schedule a flush of the fragment
+        logUpdateTimeout = setTimeout(flushLogFragment, 100);
+    }
+    
+    /**
+     * Load existing logs from the server
+     */
+    function loadExistingLogs() {
+        $.ajax({
+            url: wps3_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'wps3_get_migration_status',
+                nonce: wps3_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success && response.data.logs) {
+                    // Clear existing logs
+                    clearLog();
+                    
+                    // Add each log entry
+                    response.data.logs.forEach(function(log) {
+                        const timestamp = new Date(log.timestamp).toLocaleTimeString();
+                        logMessage(`[${timestamp}] ${log.message}`, log.type);
+                    });
+                }
+            }
+        });
+    }
+    
+    /**
+     * Clear the log
+     */
+    function clearLog() {
+        $logContainer.empty();
+        if (logFragment) {
+            logFragment = null;
+        }
+        if (logUpdateTimeout) {
+            clearTimeout(logUpdateTimeout);
+            logUpdateTimeout = null;
+        }
     }
     
     /**
@@ -692,6 +773,10 @@ jQuery(document).ready(function($) {
      * Start the migration process
      */
     function startMigration(reset = false) {
+        if (reset) {
+            clearLog();
+        }
+        
         $.ajax({
             url: wps3_ajax.ajax_url,
             type: 'POST',
@@ -893,8 +978,8 @@ jQuery(document).ready(function($) {
         resetMigration();
     });
     
-    // Check initial status on page load
-    checkStatus();
+    // Load existing logs when the page loads
+    loadExistingLogs();
 });
 JS;
 		file_put_contents($js_file, $js_content);
@@ -1083,6 +1168,8 @@ CSS;
 				update_option('wps3_migration_position', 0);
 				update_option('wps3_migration_status', 'in_progress');
 				delete_transient('wps3_migration_progress');
+				$this->clear_logs();
+				$this->add_log_entry('Migration started', 'info');
 			}
 
 			// Start migration
@@ -1090,6 +1177,7 @@ CSS;
 			if (is_wp_error($result)) {
 				$recovery_result = $this->recover_from_error($result);
 				if (is_wp_error($recovery_result)) {
+					$this->add_log_entry($recovery_result->get_error_message(), 'error');
 					wp_send_json_error($recovery_result->get_error_message());
 				}
 			}
@@ -1100,6 +1188,7 @@ CSS;
 				'progress' => get_transient('wps3_migration_progress')
 			]);
 		} catch (\Exception $e) {
+			$this->add_log_entry($e->getMessage(), 'error');
 			error_log('WPS3: Migration start error: ' . $e->getMessage());
 			wp_send_json_error($e->getMessage());
 		}
@@ -1146,10 +1235,21 @@ CSS;
 		}
 
 		try {
+			// Get recent logs
+			$logs = $this->get_recent_logs();
+			$formatted_logs = array_map(function($log) {
+				return [
+					'message' => $log->message,
+					'type' => $log->type,
+					'timestamp' => $log->created_at
+				];
+			}, $logs);
+			
 			wp_send_json_success([
 				'status' => get_option('wps3_migration_status'),
 				'position' => get_option('wps3_migration_position'),
-				'progress' => get_transient('wps3_migration_progress')
+				'progress' => get_transient('wps3_migration_progress'),
+				'logs' => $formatted_logs
 			]);
 		} catch (\Exception $e) {
 			error_log('WPS3: Status check error: ' . $e->getMessage());
@@ -1210,6 +1310,22 @@ CSS;
 		add_option('wps3_migrated_files', 0);
 		add_option('wps3_migration_running', false);
 		add_option('wps3_migration_file_list', []);
+		
+		// Create logs table
+		global $wpdb;
+		$table_name = $wpdb->prefix . 'wps3_logs';
+		$charset_collate = $wpdb->get_charset_collate();
+		
+		$sql = "CREATE TABLE IF NOT EXISTS $table_name (
+			id bigint(20) NOT NULL AUTO_INCREMENT,
+			message text NOT NULL,
+			type varchar(20) NOT NULL DEFAULT 'info',
+			created_at datetime NOT NULL,
+			PRIMARY KEY  (id)
+		) $charset_collate;";
+		
+		require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+		dbDelta($sql);
 	}
 
 	/**
@@ -1237,6 +1353,11 @@ CSS;
 		delete_option('wps3_migrated_files');
 		delete_option('wps3_migration_running');
 		delete_option('wps3_migration_file_list');
+		
+		// Remove logs table
+		global $wpdb;
+		$table_name = $wpdb->prefix . 'wps3_logs';
+		$wpdb->query("DROP TABLE IF EXISTS $table_name");
 	}
 
 	/**
@@ -1608,10 +1729,11 @@ CSS;
 				$result = $this->upload($file);
 				
 				if (is_wp_error($result)) {
-					// Log error but continue with next file
-					error_log('WPS3: Error uploading file ' . $file . ': ' . $result->get_error_message());
+					$this->add_log_entry("Error uploading file {$file}: " . $result->get_error_message(), 'error');
 					continue;
 				}
+
+				$this->add_log_entry("Successfully uploaded file: {$file}", 'success');
 
 				// Update progress
 				$progress = ($i + 1) / $total_files * 100;
@@ -1626,10 +1748,12 @@ CSS;
 				update_option('wps3_migration_position', 0);
 				update_option('wps3_migration_status', 'completed');
 				delete_transient('wps3_migration_progress');
+				$this->add_log_entry('Migration completed successfully', 'success');
 			}
 
 			return true;
 		} catch (\Exception $e) {
+			$this->add_log_entry('Batch processing error: ' . $e->getMessage(), 'error');
 			error_log('WPS3: Batch processing error: ' . $e->getMessage());
 			return new WP_Error('batch_error', $e->getMessage());
 		}
@@ -1677,6 +1801,84 @@ CSS;
 			error_log('WPS3: Error recovery failed: ' . $e->getMessage());
 			return new WP_Error('recovery_failed', $e->getMessage());
 		}
+	}
+
+	/**
+	 * Add a log entry to the database
+	 *
+	 * @param string $message The log message
+	 * @param string $type The log type (info, error, success)
+	 * @return bool Whether the log was successfully added
+	 */
+	private function add_log_entry($message, $type = 'info') {
+		global $wpdb;
+		
+		$table_name = $wpdb->prefix . 'wps3_logs';
+		
+		// Create table if it doesn't exist
+		$this->create_log_table();
+		
+		$result = $wpdb->insert(
+			$table_name,
+			[
+				'message' => $message,
+				'type' => $type,
+				'created_at' => current_time('mysql')
+			],
+			['%s', '%s', '%s']
+		);
+		
+		return $result !== false;
+	}
+	
+	/**
+	 * Create the logs table if it doesn't exist
+	 */
+	private function create_log_table() {
+		global $wpdb;
+		
+		$table_name = $wpdb->prefix . 'wps3_logs';
+		$charset_collate = $wpdb->get_charset_collate();
+		
+		$sql = "CREATE TABLE IF NOT EXISTS $table_name (
+			id bigint(20) NOT NULL AUTO_INCREMENT,
+			message text NOT NULL,
+			type varchar(20) NOT NULL DEFAULT 'info',
+			created_at datetime NOT NULL,
+			PRIMARY KEY  (id)
+		) $charset_collate;";
+		
+		require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+		dbDelta($sql);
+	}
+	
+	/**
+	 * Get recent log entries
+	 *
+	 * @param int $limit Number of entries to retrieve
+	 * @return array Array of log entries
+	 */
+	private function get_recent_logs($limit = 100) {
+		global $wpdb;
+		
+		$table_name = $wpdb->prefix . 'wps3_logs';
+		
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM $table_name ORDER BY created_at DESC LIMIT %d",
+				$limit
+			)
+		);
+	}
+	
+	/**
+	 * Clear all logs
+	 */
+	private function clear_logs() {
+		global $wpdb;
+		
+		$table_name = $wpdb->prefix . 'wps3_logs';
+		$wpdb->query("TRUNCATE TABLE $table_name");
 	}
 }
 
