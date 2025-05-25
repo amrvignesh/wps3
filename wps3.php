@@ -544,21 +544,28 @@ class WPS3 implements S3StorageInterface {
         if ($downsize !== false || !get_option('wps3_enabled') || empty($this->s3_client)) {
             return $downsize;
         }
-
-        // Validate attachment ID
-        if (!is_numeric($attachment_id) || $attachment_id <= 0) {
+        
+        // If $size is an array (e.g., [150, 150]), let WordPress handle it.
+        // Using an array as a key for $metadata['sizes'] causes a fatal error.
+        if (is_array($size)) {
             return $downsize;
         }
-
-        // Get the metadata with caching
+        
+        // Get the metadata
         $metadata = wp_get_attachment_metadata($attachment_id);
-        if (empty($metadata) || !is_array($metadata)) {
+        if (empty($metadata)) {
             return $downsize;
         }
 
         // Handle full size image
         if ($size === 'full' || empty($metadata['sizes'][$size])) {
             $url = $this->rewrite_attachment_url(wp_get_attachment_url($attachment_id), $attachment_id);
+
+            // If a valid URL could not be determined, return original $downsize
+            if (!is_string($url) || empty($url)) {
+                return $downsize;
+            }
+
             $width = isset($metadata['width']) ? intval($metadata['width']) : 0;
             $height = isset($metadata['height']) ? intval($metadata['height']) : 0;
             return [$url, $width, $height, false];
