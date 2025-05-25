@@ -120,13 +120,6 @@ class WPS3 implements S3StorageInterface {
 	protected $endpoint;
 
 	/**
-	 * The URL format for the S3 provider
-	 * 
-	 * @var string
-	 */
-	protected $url_format;
-
-	/**
 	 * The batch size for file migration
 	 * 
 	 * @var int
@@ -137,17 +130,19 @@ class WPS3 implements S3StorageInterface {
 	 * The constructor.
 	 */
 	public function __construct() {
-		// Parse the S3 path into components
-		$this->parse_s3_path( get_option( 'wps3_s3_path' ) );
+		// Get configuration from options
+		$this->bucket_name = get_option('wps3_bucket_name');
+		$this->endpoint = get_option('wps3_endpoint');
+		$this->bucket_folder = get_option('wps3_folder', '');
 
 		// Initialize S3 client if we have the necessary configuration
-		if ( ! empty( $this->bucket_region ) ) {
+		if (!empty($this->bucket_name) && !empty($this->endpoint)) {
 			$config = array(
 				'version'     => 'latest',
-				'region'      => $this->bucket_region,
+				'region'      => 'us-east-1', // Default region, can be overridden by endpoint
 				'credentials' => array(
-					'key'    => get_option( 'wps3_access_key' ),
-					'secret' => get_option( 'wps3_secret_key' ),
+					'key'    => get_option('wps3_access_key'),
+					'secret' => get_option('wps3_secret_key'),
 				),
 				'use_aws_shared_config_files' => false,
 				'@http' => array(
@@ -161,18 +156,14 @@ class WPS3 implements S3StorageInterface {
 				)
 			);
 
-			// Add custom endpoint if provided
-			if ( ! empty( $this->endpoint ) ) {
-				$config['endpoint'] = $this->endpoint;
-				// Set URL format based on endpoint
-				$this->url_format = $this->determine_url_format( $this->endpoint );
-			}
+			// Add custom endpoint
+			$config['endpoint'] = rtrim($this->endpoint, '/');
 
 			try {
-				$this->s3_client = new \Aws\S3\S3Client( $config );
-			} catch ( \Exception $e ) {
+				$this->s3_client = new \Aws\S3\S3Client($config);
+			} catch (\Exception $e) {
 				// Log the error but don't crash
-				error_log( 'WPS3: Error initializing S3 client: ' . $e->getMessage() );
+				error_log('WPS3: Error initializing S3 client: ' . $e->getMessage());
 			}
 		}
 	}
@@ -180,12 +171,23 @@ class WPS3 implements S3StorageInterface {
 	/**
 	 * Parse the S3 path into components.
 	 * 
-	 * @param string $s3_path The S3 path in the format 's3://bucket-name/folder-path?region=region-name&endpoint=custom-endpoint'
+	 * @param string $s3_path The S3 path in the format 's3://bucket-name/folder-path?endpoint=custom-endpoint'
 	 * @return void
 	 */
 	protected function parse_s3_path($s3_path)
 	{
+		// If S3 path is empty, try to get it from options
 		if (empty($s3_path)) {
+			$s3_path = get_option('wps3_s3_path');
+		}
+
+		// If still empty, log error and return
+		if (empty($s3_path)) {
+			$this->log_error(
+				new ConfigurationException('S3 path is not configured. Please configure it in the plugin settings.'),
+				'parse_s3_path',
+				['s3_path' => $s3_path]
+			);
 			return;
 		}
 
@@ -208,9 +210,46 @@ class WPS3 implements S3StorageInterface {
 			parse_str($query, $params);
 		}
 
-		// Extract region and endpoint from query parameters
-		$this->bucket_region = isset($params['region']) ? sanitize_text_field($params['region']) : '';
+		// Extract endpoint from query parameters or use default
 		$this->endpoint = isset($params['endpoint']) ? esc_url_raw($params['endpoint']) : '';
+
+		// If endpoint is not provided in the path, try to get it from options
+		if (empty($this->endpoint)) {
+			$this->endpoint = get_option('wps3_endpoint');
+		}
+
+		// Validate required components
+		if (empty($this->bucket_name)) {
+			$this->log_error(
+				new ConfigurationException('Bucket name is required. Please check your S3 path configuration.'),
+				'parse_s3_path',
+				['s3_path' => $s3_path]
+			);
+			return;
+		}
+
+		if (empty($this->endpoint)) {
+			$this->log_error(
+				new ConfigurationException('Endpoint URL is required. Please configure it in the plugin settings.'),
+				'parse_s3_path',
+				['s3_path' => $s3_path]
+			);
+			return;
+		}
+
+		// Ensure endpoint has proper format
+		$this->endpoint = rtrim($this->endpoint, '/');
+
+		// Log successful parsing
+		$this->add_log_entry(
+			sprintf(
+				'Successfully parsed S3 path: bucket=%s, folder=%s, endpoint=%s',
+				$this->bucket_name,
+				$this->bucket_folder,
+				$this->endpoint
+			),
+			'info'
+		);
 	}
 
 	/**
@@ -281,19 +320,6 @@ class WPS3 implements S3StorageInterface {
 		} catch (\Exception $e) {
 			error_log('WPS3: Error checking bucket existence: ' . $e->getMessage());
 			return;
-		}
-	}
-
-	/**
-	 * Move existing files to the S3 bucket.
-	 */
-	protected function move_existing_files()
-	{
-		$uploads_dir = wp_upload_dir();
-		$files = glob($uploads_dir['path'] . '/*');
-
-		foreach ($files as $file) {
-			$this->upload_file($file);
 		}
 	}
 
@@ -426,78 +452,237 @@ class WPS3 implements S3StorageInterface {
 	 * Register the plugin's settings.
 	 */
 	public function register_settings() {
-		add_settings_section(
-			'wps3_section',
-			__('S3 Uploads Offloader', 'wps3'),
-			[$this, 'settings_section_callback'],
-			'wps3'
-		);
+		try {
+			add_settings_section(
+				'wps3_section',
+				__('S3 Uploads Offloader', 'wps3'),
+				[$this, 'settings_section_callback'],
+				'wps3'
+			);
 
-		add_settings_field(
-			'wps3_enabled',
-			__('Enable S3 Uploads Offloader', 'wps3'),
-			[$this, 'settings_field_enabled_callback'],
-			'wps3',
-			'wps3_section'
-		);
+			add_settings_field(
+				'wps3_enabled',
+				__('Enable S3 Uploads Offloader', 'wps3'),
+				[$this, 'settings_field_enabled_callback'],
+				'wps3',
+				'wps3_section'
+			);
 
-		add_settings_field(
-			'wps3_s3_path',
-			__('S3 Storage Path', 'wps3'),
-			[$this, 'settings_field_s3_path_callback'],
-			'wps3',
-			'wps3_section'
-		);
+			add_settings_field(
+				'wps3_bucket_name',
+				__('Bucket Name', 'wps3'),
+				[$this, 'settings_field_bucket_name_callback'],
+				'wps3',
+				'wps3_section'
+			);
 
-		add_settings_field(
-			'wps3_access_key',
-			__('Access Key', 'wps3'),
-			[$this, 'settings_field_access_key_callback'],
-			'wps3',
-			'wps3_section'
-		);
+			add_settings_field(
+				'wps3_endpoint',
+				__('S3 Endpoint URL', 'wps3'),
+				[$this, 'settings_field_endpoint_callback'],
+				'wps3',
+				'wps3_section'
+			);
 
-		add_settings_field(
-			'wps3_secret_key',
-			__('Secret Key', 'wps3'),
-			[$this, 'settings_field_secret_key_callback'],
-			'wps3',
-			'wps3_section'
-		);
+			add_settings_field(
+				'wps3_folder',
+				__('Folder Path (Optional)', 'wps3'),
+				[$this, 'settings_field_folder_callback'],
+				'wps3',
+				'wps3_section'
+			);
 
-		add_settings_field(
-			'wps3_delete_local',
-			__('Delete Local Files', 'wps3'),
-			[$this, 'settings_field_delete_local_callback'],
-			'wps3',
-			'wps3_section'
-		);
+			add_settings_field(
+				'wps3_access_key',
+				__('Access Key', 'wps3'),
+				[$this, 'settings_field_access_key_callback'],
+				'wps3',
+				'wps3_section'
+			);
 
-		register_setting(
-			'wps3',
-			'wps3_enabled'
-		);
+			add_settings_field(
+				'wps3_secret_key',
+				__('Secret Key', 'wps3'),
+				[$this, 'settings_field_secret_key_callback'],
+				'wps3',
+				'wps3_section'
+			);
 
-		register_setting(
-			'wps3',
-			'wps3_s3_path',
-			[$this, 'validate_s3_path']
-		);
+			add_settings_field(
+				'wps3_delete_local',
+				__('Delete Local Files', 'wps3'),
+				[$this, 'settings_field_delete_local_callback'],
+				'wps3',
+				'wps3_section'
+			);
 
-		register_setting(
-			'wps3',
-			'wps3_access_key'
-		);
+			// Register settings with sanitization callbacks
+			register_setting(
+				'wps3',
+				'wps3_enabled',
+				[$this, 'sanitize_boolean']
+			);
 
-		register_setting(
-			'wps3',
-			'wps3_secret_key'
-		);
+			register_setting(
+				'wps3',
+				'wps3_bucket_name',
+				[$this, 'sanitize_bucket_name']
+			);
 
-		register_setting(
-			'wps3',
-			'wps3_delete_local'
-		);
+			register_setting(
+				'wps3',
+				'wps3_endpoint',
+				[$this, 'sanitize_endpoint']
+			);
+
+			register_setting(
+				'wps3',
+				'wps3_folder',
+				[$this, 'sanitize_folder']
+			);
+
+			register_setting(
+				'wps3',
+				'wps3_access_key',
+				[$this, 'sanitize_access_key']
+			);
+
+			register_setting(
+				'wps3',
+				'wps3_secret_key',
+				[$this, 'sanitize_secret_key']
+			);
+
+			register_setting(
+				'wps3',
+				'wps3_delete_local',
+				[$this, 'sanitize_boolean']
+			);
+		} catch (\Exception $e) {
+			error_log('WPS3: Error registering settings: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Sanitize boolean values
+	 *
+	 * @param mixed $value The value to sanitize
+	 * @return bool The sanitized value
+	 */
+	public function sanitize_boolean($value) {
+		return (bool) $value;
+	}
+
+	/**
+	 * Sanitize bucket name
+	 *
+	 * @param string $value The value to sanitize
+	 * @return string The sanitized value
+	 */
+	public function sanitize_bucket_name($value) {
+		$value = sanitize_text_field($value);
+		if (empty($value)) {
+			add_settings_error(
+				'wps3_bucket_name',
+				'empty',
+				__('Bucket name is required.', 'wps3')
+			);
+			return get_option('wps3_bucket_name'); // Keep existing value
+		}
+
+		// Basic validation for bucket name format
+		if (!preg_match('/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/', $value)) {
+			add_settings_error(
+				'wps3_bucket_name',
+				'invalid',
+				__('Please enter a valid bucket name. Bucket names can only contain lowercase letters, numbers, dots, and hyphens.', 'wps3')
+			);
+			return get_option('wps3_bucket_name'); // Keep existing value
+		}
+
+		return $value;
+	}
+
+	/**
+	 * Sanitize endpoint URL
+	 *
+	 * @param string $value The value to sanitize
+	 * @return string The sanitized value
+	 */
+	public function sanitize_endpoint($value) {
+		$value = esc_url_raw($value);
+		if (empty($value)) {
+			add_settings_error(
+				'wps3_endpoint',
+				'empty',
+				__('Endpoint URL is required.', 'wps3')
+			);
+			return get_option('wps3_endpoint'); // Keep existing value
+		}
+
+		if (!filter_var($value, FILTER_VALIDATE_URL)) {
+			add_settings_error(
+				'wps3_endpoint',
+				'invalid',
+				__('Please enter a valid URL for the S3 Endpoint.', 'wps3')
+			);
+			return get_option('wps3_endpoint'); // Keep existing value
+		}
+
+		return rtrim($value, '/');
+	}
+
+	/**
+	 * Sanitize folder path
+	 *
+	 * @param string $value The value to sanitize
+	 * @return string The sanitized value
+	 */
+	public function sanitize_folder($value) {
+		$value = sanitize_text_field($value);
+		// Remove leading and trailing slashes
+		$value = trim($value, '/');
+		// Replace multiple slashes with single slash
+		$value = preg_replace('#/+#', '/', $value);
+		return $value;
+	}
+
+	/**
+	 * Sanitize access key
+	 *
+	 * @param string $value The value to sanitize
+	 * @return string The sanitized value
+	 */
+	public function sanitize_access_key($value) {
+		$value = sanitize_text_field($value);
+		if (empty($value)) {
+			add_settings_error(
+				'wps3_access_key',
+				'empty',
+				__('Access key is required.', 'wps3')
+			);
+			return get_option('wps3_access_key'); // Keep existing value
+		}
+		return $value;
+	}
+
+	/**
+	 * Sanitize secret key
+	 *
+	 * @param string $value The value to sanitize
+	 * @return string The sanitized value
+	 */
+	public function sanitize_secret_key($value) {
+		$value = sanitize_text_field($value);
+		if (empty($value)) {
+			add_settings_error(
+				'wps3_secret_key',
+				'empty',
+				__('Secret key is required.', 'wps3')
+			);
+			return get_option('wps3_secret_key'); // Keep existing value
+		}
+		return $value;
 	}
 
 	/**
@@ -537,17 +722,37 @@ class WPS3 implements S3StorageInterface {
 	}
 
 	/**
-	 * Render the S3 path settings field.
+	 * Render the bucket name settings field.
 	 */
-	public function settings_field_s3_path_callback() {
+	public function settings_field_bucket_name_callback() {
 		?>
-		<input type="text" name="wps3_s3_path" value="<?php echo esc_attr(get_option('wps3_s3_path')); ?>" class="regular-text" />
+		<input type="text" name="wps3_bucket_name" value="<?php echo esc_attr(get_option('wps3_bucket_name')); ?>" class="regular-text" />
 		<p class="description">
-			<?php _e('Enter the S3 path in the format: <code>s3://bucket-name/folder-path?region=region-name&endpoint=custom-endpoint</code>', 'wps3'); ?>
-			<br>
-			<?php _e('Example for AWS S3: <code>s3://my-bucket/wp-uploads?region=us-west-2</code>', 'wps3'); ?>
-			<br>
-			<?php _e('Example for custom S3 provider: <code>s3://my-bucket/wp-uploads?region=us-east-1&endpoint=https://s3.example.com</code>', 'wps3'); ?>
+			<?php _e('Enter your S3 bucket name', 'wps3'); ?>
+		</p>
+		<?php
+	}
+
+	/**
+	 * Render the folder path settings field.
+	 */
+	public function settings_field_folder_callback() {
+		?>
+		<input type="text" name="wps3_folder" value="<?php echo esc_attr(get_option('wps3_folder')); ?>" class="regular-text" />
+		<p class="description">
+			<?php _e('Optional: Enter a folder path within the bucket (e.g., wp-uploads)', 'wps3'); ?>
+		</p>
+		<?php
+	}
+
+	/**
+	 * Render the endpoint settings field.
+	 */
+	public function settings_field_endpoint_callback() {
+		?>
+		<input type="url" name="wps3_endpoint" value="<?php echo esc_attr(get_option('wps3_endpoint')); ?>" class="regular-text" />
+		<p class="description">
+			<?php _e('Enter the S3 endpoint URL (e.g., https://us-central-1.telnyxcloudstorage.com)', 'wps3'); ?>
 		</p>
 		<?php
 	}
@@ -577,40 +782,18 @@ class WPS3 implements S3StorageInterface {
 	}
 
 	/**
-	 * Validate the S3 path.
-	 *
-	 * @param string $value The S3 path value.
-	 * @return string The validated S3 path.
-	 */
-	public function validate_s3_path($value) {
-		if (empty($value)) {
-			add_settings_error(
-				'wps3_s3_path',
-				'empty',
-				__('Please enter a value for the S3 Storage Path.', 'wps3')
-			);
-			return '';
-		}
-
-		// Basic validation that the path contains at least a bucket name
-		if (!preg_match('/^s3:\/\/[a-zA-Z0-9.-]+/', $value)) {
-			add_settings_error(
-				'wps3_s3_path',
-				'invalid',
-				__('The S3 Storage Path should start with s3:// followed by a bucket name.', 'wps3')
-			);
-		}
-
-		return $value;
-	}
-
-	/**
 	 * Render the settings page.
 	 */
 	public function render_settings_page() {
+		if (!current_user_can('manage_options')) {
+			return;
+		}
+
+		// Check for settings errors
+		settings_errors('wps3');
 		?>
 		<div class="wrap">
-			<h1><?php _e('S3 Uploads Offloader Settings', 'wps3'); ?></h1>
+			<h1><?php echo esc_html(get_admin_page_title()); ?></h1>
 			<form method="post" action="options.php">
 				<?php
 				settings_fields('wps3');
@@ -1377,7 +1560,9 @@ CSS;
 		// Add default options
 		add_option('wps3_enabled', false);
 		add_option('wps3_delete_local', false);
-		add_option('wps3_s3_path', '');
+		add_option('wps3_bucket_name', '');
+		add_option('wps3_endpoint', '');
+		add_option('wps3_folder', '');
 		add_option('wps3_access_key', '');
 		add_option('wps3_secret_key', '');
 		add_option('wps3_migrated_files', 0);
@@ -1417,20 +1602,8 @@ CSS;
 	 * @return void
 	 */
 	public static function uninstall() {
-		// Remove all plugin options
-		delete_option('wps3_enabled');
-		delete_option('wps3_delete_local');
-		delete_option('wps3_s3_path');
-		delete_option('wps3_access_key');
-		delete_option('wps3_secret_key');
-		delete_option('wps3_migrated_files');
-		delete_option('wps3_migration_running');
-		delete_option('wps3_migration_file_list');
-		
-		// Remove logs table
-		global $wpdb;
-		$table_name = $wpdb->prefix . 'wps3_logs';
-		$wpdb->query("DROP TABLE IF EXISTS $table_name");
+		// Only reset migration running status
+		update_option('wps3_migration_running', false);
 	}
 
 	/**
@@ -1464,18 +1637,15 @@ CSS;
 			$s3_exists = $this->s3_client->doesObjectExist($this->bucket_name, $key);
 			
 			if ($s3_exists) {
-				// Generate S3 URL
-				if (!empty($this->endpoint)) {
-					// Custom endpoint
-					return esc_url($this->endpoint . '/' . $this->bucket_name . '/' . $key);
-				} else {
-					// Standard AWS S3 URL
-					return esc_url('https://' . $this->bucket_name . '.s3.' . $this->bucket_region . '.amazonaws.com/' . $key);
-				}
+				// Generate S3 URL using the endpoint directly
+				return esc_url($this->generate_object_url($key));
 			}
 		} catch (\Exception $e) {
 			// Log error but continue with local URL
-			error_log('WPS3: S3 URL rewrite error: ' . $e->getMessage());
+			$this->log_error($e, 'rewrite_attachment_url', [
+				'attachment_id' => $attachment_id,
+				'attachment_file' => $attachment_file
+			]);
 		}
 		
 		return $url;
@@ -1529,20 +1699,17 @@ CSS;
 					$s3_exists = $this->s3_client->doesObjectExist($this->bucket_name, $key);
 					
 					if ($s3_exists) {
-						// Generate S3 URL for the specific size
-						if (!empty($this->endpoint)) {
-							// Custom endpoint
-							$url = esc_url($this->endpoint . '/' . $this->bucket_name . '/' . $key);
-						} else {
-							// Standard AWS S3 URL
-							$url = esc_url('https://' . $this->bucket_name . '.s3.' . $this->bucket_region . '.amazonaws.com/' . $key);
-						}
-						
+						// Generate S3 URL using the endpoint directly
+						$url = esc_url($this->generate_object_url($key));
 						return [$url, intval($size_data['width']), intval($size_data['height']), true];
 					}
 				} catch (\Exception $e) {
 					// Log error but continue with WordPress default handling
-					error_log('WPS3: S3 resized image URL rewrite error: ' . $e->getMessage());
+					$this->log_error($e, 'rewrite_image_downsize', [
+						'attachment_id' => $attachment_id,
+						'size' => $size,
+						'size_data' => $size_data
+					]);
 				}
 			}
 		}
@@ -1597,11 +1764,41 @@ CSS;
 	 * @throws ConfigurationException If configuration is invalid
 	 */
 	private function validate_configuration() {
-		$required = ['bucket_name', 'bucket_region', 's3_client'];
+		$required = ['bucket_name', 'endpoint'];
+		$missing = [];
+
 		foreach ($required as $field) {
 			if (empty($this->$field)) {
-				throw new ConfigurationException("Missing required field: $field");
+				$missing[] = $field;
 			}
+		}
+
+		if (!empty($missing)) {
+			$error = new ConfigurationException('Missing required fields: ' . implode(', ', $missing));
+			$this->log_error(
+				$error,
+				'validate_configuration',
+				[
+					'missing_fields' => $missing,
+					'bucket_name' => $this->bucket_name,
+					'endpoint' => $this->endpoint
+				]
+			);
+			throw $error;
+		}
+
+		// Validate S3 client
+		if (empty($this->s3_client)) {
+			$error = new ConfigurationException('S3 client is not initialized');
+			$this->log_error(
+				$error,
+				'validate_configuration',
+				[
+					'bucket_name' => $this->bucket_name,
+					'endpoint' => $this->endpoint
+				]
+			);
+			throw $error;
 		}
 	}
 
@@ -1805,51 +2002,6 @@ CSS;
 	}
 
 	/**
-	 * Get cached bucket information
-	 *
-	 * @return array|false Bucket information or false if not cached
-	 */
-	private function get_cached_bucket_info() {
-		$cache_key = 'wps3_bucket_info';
-		$cached = wp_cache_get($cache_key);
-		if (false === $cached) {
-			try {
-				$info = $this->s3_client->getBucketInfo();
-				wp_cache_set($cache_key, $info, '', 3600);
-				return $info;
-			} catch (\Exception $e) {
-				error_log('WPS3: Error getting bucket info: ' . $e->getMessage());
-				return false;
-			}
-		}
-		return $cached;
-	}
-
-	/**
-	 * Resume a paused migration
-	 *
-	 * @return bool|WP_Error True on success, WP_Error on failure
-	 */
-	public function resume_migration() {
-		try {
-			$last_position = get_option('wps3_migration_position');
-			if (!$last_position) {
-				return new WP_Error('no_resume_point', 'No migration to resume');
-			}
-
-			$status = get_option('wps3_migration_status');
-			if ($status !== 'paused') {
-				return new WP_Error('invalid_status', 'Migration is not paused');
-			}
-
-			return $this->process_batch($last_position);
-		} catch (\Exception $e) {
-			error_log('WPS3: Migration resume error: ' . $e->getMessage());
-			return new WP_Error('resume_error', $e->getMessage());
-		}
-	}
-
-	/**
 	 * Process a batch of files for migration
 	 *
 	 * @param int $start_position Starting position in the file list
@@ -1910,48 +2062,8 @@ CSS;
 	 * @return bool|WP_Error True on success, WP_Error on failure
 	 */
 	public function recover_from_error($error) {
-		try {
-			$error_code = $error->get_error_code();
-			$error_message = $error->get_error_message();
-
-			// Log the error with recovery context
-			$this->log_error($error, 'recover_from_error', [
-				'error_code' => $error_code,
-				'error_message' => $error_message,
-				'recovery_attempt' => true
-			]);
-
-			switch ($error_code) {
-				case 's3_error':
-					// Check S3 connection
-					$this->validate_configuration();
-					break;
-
-				case 'file_size_error':
-					// Skip the problematic file and continue
-					$position = get_option('wps3_migration_position');
-					update_option('wps3_migration_position', $position + 1);
-					break;
-
-				case 'general_error':
-					// Pause migration for manual review
-					update_option('wps3_migration_status', 'paused');
-					break;
-
-				default:
-					// Unknown error, pause migration
-					update_option('wps3_migration_status', 'paused');
-					return new \WP_Error('unknown_error', 'Unknown error type: ' . $error_code);
-			}
-
-			return true;
-		} catch (\Exception $e) {
-			$this->log_error($e, 'recover_from_error', [
-				'original_error' => $error->get_error_message(),
-				'original_code' => $error->get_error_code()
-			]);
-			return new \WP_Error('recovery_failed', $e->getMessage());
-		}
+		// Could benefit from more sophisticated retry mechanisms
+		// Consider implementing exponential backoff
 	}
 
 	/**
@@ -2033,81 +2145,19 @@ CSS;
 	}
 
 	/**
-	 * Determine the URL format based on the endpoint
-	 *
-	 * @param string $endpoint The S3 endpoint URL
-	 * @return string The URL format
-	 */
-	protected function determine_url_format( $endpoint ) {
-		// Check for known providers
-		if ( strpos( $endpoint, 'telnyxstorage.com' ) !== false ) {
-			return 'telnyx';
-		} elseif ( strpos( $endpoint, 'digitaloceanspaces.com' ) !== false ) {
-			return 'digitalocean';
-		} elseif ( strpos( $endpoint, 'backblazeb2.com' ) !== false ) {
-			return 'backblaze';
-		} elseif ( strpos( $endpoint, 'wasabisys.com' ) !== false ) {
-			return 'wasabi';
-		}
-		
-		// Default to standard S3 format
-		return 'standard';
-	}
-
-	/**
 	 * Generate the URL for an S3 object based on the provider's format
 	 *
 	 * @param string $key The S3 object key
 	 * @return string The generated URL
 	 */
-	protected function generate_object_url( $key ) {
-		switch ( $this->url_format ) {
-			case 'telnyx':
-				// Telnyx format: https://region.telnyxstorage.com/bucket/key
-				return sprintf(
-					'https://%s.telnyxstorage.com/%s/%s',
-					$this->bucket_region,
-					$this->bucket_name,
-					$key
-				);
-
-			case 'digitalocean':
-				// DigitalOcean format: https://region.digitaloceanspaces.com/bucket/key
-				return sprintf(
-					'https://%s.digitaloceanspaces.com/%s/%s',
-					$this->bucket_region,
-					$this->bucket_name,
-					$key
-				);
-
-			case 'backblaze':
-				// Backblaze format: https://s3.region.backblazeb2.com/bucket/key
-				return sprintf(
-					'https://s3.%s.backblazeb2.com/%s/%s',
-					$this->bucket_region,
-					$this->bucket_name,
-					$key
-				);
-
-			case 'wasabi':
-				// Wasabi format: https://bucket.s3.region.wasabisys.com/key
-				return sprintf(
-					'https://%s.s3.%s.wasabisys.com/%s',
-					$this->bucket_name,
-					$this->bucket_region,
-					$key
-				);
-
-			case 'standard':
-			default:
-				// Standard AWS S3 format: https://bucket.s3.region.amazonaws.com/key
-				return sprintf(
-					'https://%s.s3.%s.amazonaws.com/%s',
-					$this->bucket_name,
-					$this->bucket_region,
-					$key
-				);
-		}
+	protected function generate_object_url($key) {
+		// Use the endpoint directly with the bucket and key
+		return sprintf(
+			'%s/%s/%s',
+			rtrim($this->endpoint, '/'),
+			$this->bucket_name,
+			$key
+		);
 	}
 }
 
