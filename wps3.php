@@ -547,6 +547,12 @@ class WPS3 implements S3StorageInterface {
         // If size is the full size, use the attachment URL
         if ($size === 'full' || empty($metadata['sizes'][$size])) {
             $url = $this->rewrite_attachment_url(wp_get_attachment_url($attachment_id), $attachment_id);
+
+            // If a valid URL could not be determined, return original $downsize
+            if (!is_string($url) || empty($url)) {
+                return $downsize;
+            }
+
             $width = isset($metadata['width']) ? intval($metadata['width']) : 0;
             $height = isset($metadata['height']) ? intval($metadata['height']) : 0;
             return [$url, $width, $height, false];
