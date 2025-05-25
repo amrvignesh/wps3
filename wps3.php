@@ -504,3 +504,4 @@ function filterByType($files, $type) { }
 // Track batch processing time 
 // Add support for S3 transfer acceleration 
 <input type=\"checkbox\" name=\"use_acceleration\"> 
+function formatFileSize($bytes) { } 
