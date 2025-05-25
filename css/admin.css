@@ -1,0 +1,63 @@
+.wps3-migration-status {
+    margin-top: 20px;
+    max-width: 800px;
+}
+
+.wps3-progress-bar-container {
+    width: 100%;
+    background-color: #e0e0e0;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    overflow: hidden;
+}
+
+.wps3-progress-bar {
+    height: 30px;
+    background-color: #2271b1;
+    text-align: center;
+    color: white;
+    line-height: 30px;
+    transition: width 0.3s ease;
+    min-width: 20px;
+}
+
+.wps3-migration-controls {
+    margin: 20px 0;
+}
+
+.wps3-migration-log {
+    margin-top: 30px;
+    border: 1px solid #ddd;
+    padding: 10px;
+    max-height: 300px;
+    overflow-y: auto;
+    background-color: #f9f9f9;
+}
+
+#wps3-log-container {
+    font-family: monospace;
+    white-space: pre-wrap;
+}
+
+.wps3-log-entry {
+    margin-bottom: 5px;
+    padding: 5px;
+    border-bottom: 1px solid #eee;
+}
+
+.wps3-log-success {
+    color: #008000;
+}
+
+.wps3-log-error {
+    color: #ff0000;
+}
+
+.wps3-log-info {
+    color: #0073aa;
+}
+
+.wps3-migration-stats {
+    font-size: 14px;
+    font-weight: bold;
+} 
