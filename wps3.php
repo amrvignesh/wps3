@@ -537,6 +537,12 @@ class WPS3 implements S3StorageInterface {
         if ($downsize !== false || !get_option('wps3_enabled') || empty($this->s3_client)) {
             return $downsize;
         }
+
+        // If $size is an array (e.g., [150, 150]), let WordPress handle it.
+        // Using an array as a key for $metadata['sizes'] causes a fatal error.
+        if (is_array($size)) {
+            return $downsize;
+        }
         
         // Get the metadata
         $metadata = wp_get_attachment_metadata($attachment_id);
