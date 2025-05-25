@@ -149,6 +149,16 @@ class WPS3 implements S3StorageInterface {
 					'key'    => get_option( 'wps3_access_key' ),
 					'secret' => get_option( 'wps3_secret_key' ),
 				),
+				'use_aws_shared_config_files' => false,
+				'@http' => array(
+					'verify' => true
+				),
+				'@api' => array(
+					'checksum' => array(
+						'request' => 'when_required',
+						'response' => 'when_required'
+					)
+				)
 			);
 
 			// Add custom endpoint if provided
@@ -1621,6 +1631,54 @@ CSS;
 	}
 
 	/**
+	 * Log detailed error information
+	 *
+	 * @param \Exception|\Error|WP_Error $error The error to log
+	 * @param string $context Additional context about where the error occurred
+	 * @param array $extra_data Additional data to log
+	 * @return void
+	 */
+	private function log_error($error, $context = '', $extra_data = array()) {
+		$error_data = array(
+			'timestamp' => current_time('mysql'),
+			'context' => $context,
+			'error_type' => get_class($error),
+			'message' => $error->getMessage(),
+			'code' => $error->getCode(),
+			'file' => $error->getFile(),
+			'line' => $error->getLine(),
+			'trace' => $error->getTraceAsString(),
+		);
+
+		// Add extra data if provided
+		if (!empty($extra_data)) {
+			$error_data['extra'] = $extra_data;
+		}
+
+		// For WP_Error objects, include error data
+		if ($error instanceof \WP_Error) {
+			$error_data['wp_error_data'] = $error->get_error_data();
+			$error_data['wp_error_codes'] = $error->get_error_codes();
+		}
+
+		// Log to WordPress error log
+		error_log('WPS3 Error: ' . print_r($error_data, true));
+
+		// Add to our custom logs table
+		$this->add_log_entry(
+			sprintf(
+				'Error in %s: %s (Code: %s) in %s:%d',
+				$context,
+				$error->getMessage(),
+				$error->getCode(),
+				$error->getFile(),
+				$error->getLine()
+			),
+			'error'
+		);
+	}
+
+	/**
 	 * Upload a file to S3 storage
 	 *
 	 * @param string $file Path to the file to upload
@@ -1632,16 +1690,25 @@ CSS;
 		try {
 			// Validate file
 			if (!file_exists($file)) {
-				return new WP_Error('file_not_found', 'File does not exist');
+				$error = new \WP_Error('file_not_found', 'File does not exist');
+				$this->log_error($error, 'upload', ['file' => $file]);
+				return $error;
 			}
 
 			// Validate file size
-			$this->validate_file_size($file);
+			try {
+				$this->validate_file_size($file);
+			} catch (FileSizeException $e) {
+				$this->log_error($e, 'upload', ['file' => $file, 'size' => filesize($file)]);
+				return new \WP_Error('file_size_error', $e->getMessage());
+			}
 
 			// Get file info
 			$file_info = wp_check_filetype(basename($file));
 			if (!$file_info['type']) {
-				return new WP_Error('invalid_file_type', 'Invalid file type');
+				$error = new \WP_Error('invalid_file_type', 'Invalid file type');
+				$this->log_error($error, 'upload', ['file' => $file, 'file_info' => $file_info]);
+				return $error;
 			}
 
 			// Prepare upload
@@ -1651,13 +1718,23 @@ CSS;
 			do_action('wps3_before_upload', $file);
 
 			// Upload to S3
-			$result = $this->s3_client->putObject([
-				'Bucket' => $this->bucket_name,
-				'Key' => $key,
-				'Body' => file_get_contents($file),
-				'ContentType' => $file_info['type'],
-				'ACL' => 'public-read',
-			]);
+			try {
+				$result = $this->s3_client->putObject([
+					'Bucket' => $this->bucket_name,
+					'Key' => $key,
+					'Body' => file_get_contents($file),
+					'ContentType' => $file_info['type'],
+					'ACL' => 'public-read',
+				]);
+			} catch (\Aws\S3\Exception\S3Exception $e) {
+				$this->log_error($e, 'upload', [
+					'file' => $file,
+					'bucket' => $this->bucket_name,
+					'key' => $key,
+					'content_type' => $file_info['type']
+				]);
+				return new \WP_Error('s3_error', $e->getMessage());
+			}
 
 			// Delete local file if enabled
 			if (get_option('wps3_delete_local')) {
@@ -1667,15 +1744,9 @@ CSS;
 			do_action('wps3_after_upload', $file, $result);
 
 			return true;
-		} catch (\Aws\S3\Exception\S3Exception $e) {
-			error_log('WPS3: S3 specific error: ' . $e->getMessage());
-			return new WP_Error('s3_error', $e->getMessage());
-		} catch (FileSizeException $e) {
-			error_log('WPS3: File size error: ' . $e->getMessage());
-			return new WP_Error('file_size_error', $e->getMessage());
 		} catch (\Exception $e) {
-			error_log('WPS3: General error: ' . $e->getMessage());
-			return new WP_Error('general_error', $e->getMessage());
+			$this->log_error($e, 'upload', ['file' => $file, 'options' => $options]);
+			return new \WP_Error('general_error', $e->getMessage());
 		}
 	}
 
@@ -1693,8 +1764,8 @@ CSS;
 			]);
 			return true;
 		} catch (\Exception $e) {
-			error_log('WPS3: Delete error: ' . $e->getMessage());
-			return new WP_Error('delete_error', $e->getMessage());
+			$this->log_error($e, 'delete', ['key' => $key, 'bucket' => $this->bucket_name]);
+			return new \WP_Error('delete_error', $e->getMessage());
 		}
 	}
 
@@ -1704,17 +1775,17 @@ CSS;
 	 * @param string $key The S3 object key
 	 * @return string|WP_Error The URL or WP_Error on failure
 	 */
-	public function getUrl( $key ) {
+	public function getUrl($key) {
 		try {
-			$this->validate_url( $key );
+			$this->validate_url($key);
 			
 			// Allow URL format to be filtered
-			$url = apply_filters( 'wps3_file_url', $this->generate_object_url( $key ), $key, $this->bucket_name, $this->bucket_region );
+			$url = apply_filters('wps3_file_url', $this->generate_object_url($key), $key, $this->bucket_name, $this->bucket_region);
 			
-			return esc_url( $url );
-		} catch ( \Exception $e ) {
-			error_log( 'WPS3: URL generation error: ' . $e->getMessage() );
-			return new WP_Error( 'url_error', $e->getMessage() );
+			return esc_url($url);
+		} catch (\Exception $e) {
+			$this->log_error($e, 'getUrl', ['key' => $key]);
+			return new \WP_Error('url_error', $e->getMessage());
 		}
 	}
 
@@ -1796,7 +1867,11 @@ CSS;
 				$result = $this->upload($file);
 				
 				if (is_wp_error($result)) {
-					$this->add_log_entry("Error uploading file {$file}: " . $result->get_error_message(), 'error');
+					$this->log_error($result, 'process_batch', [
+						'file' => $file,
+						'position' => $i,
+						'total_files' => $total_files
+					]);
 					continue;
 				}
 
@@ -1820,9 +1895,11 @@ CSS;
 
 			return true;
 		} catch (\Exception $e) {
-			$this->add_log_entry('Batch processing error: ' . $e->getMessage(), 'error');
-			error_log('WPS3: Batch processing error: ' . $e->getMessage());
-			return new WP_Error('batch_error', $e->getMessage());
+			$this->log_error($e, 'process_batch', [
+				'start_position' => $start_position,
+				'batch_size' => $batch_size
+			]);
+			return new \WP_Error('batch_error', $e->getMessage());
 		}
 	}
 
@@ -1837,8 +1914,12 @@ CSS;
 			$error_code = $error->get_error_code();
 			$error_message = $error->get_error_message();
 
-			// Log the error
-			error_log('WPS3: Recovery from error: ' . $error_code . ' - ' . $error_message);
+			// Log the error with recovery context
+			$this->log_error($error, 'recover_from_error', [
+				'error_code' => $error_code,
+				'error_message' => $error_message,
+				'recovery_attempt' => true
+			]);
 
 			switch ($error_code) {
 				case 's3_error':
@@ -1860,13 +1941,16 @@ CSS;
 				default:
 					// Unknown error, pause migration
 					update_option('wps3_migration_status', 'paused');
-					return new WP_Error('unknown_error', 'Unknown error type: ' . $error_code);
+					return new \WP_Error('unknown_error', 'Unknown error type: ' . $error_code);
 			}
 
 			return true;
 		} catch (\Exception $e) {
-			error_log('WPS3: Error recovery failed: ' . $e->getMessage());
-			return new WP_Error('recovery_failed', $e->getMessage());
+			$this->log_error($e, 'recover_from_error', [
+				'original_error' => $error->get_error_message(),
+				'original_code' => $error->get_error_code()
+			]);
+			return new \WP_Error('recovery_failed', $e->getMessage());
 		}
 	}
 
