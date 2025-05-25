@@ -205,6 +205,8 @@ class WPS3 implements S3StorageInterface {
         add_action('wp_ajax_wps3_process_batch', [$this, 'ajax_process_batch']);
         add_action('wp_ajax_wps3_get_migration_status', [$this, 'ajax_get_migration_status']);
         add_action('wp_ajax_wps3_pause_migration', [$this, 'ajax_pause_migration']);
+        add_action('wp_ajax_wps3_reset_migration', [$this, 'ajax_reset_migration']);
+        add_action('wp_ajax_wps3_update_option', [$this, 'ajax_update_option']);
         
         // Filters for rewriting URLs
         add_filter('wp_get_attachment_url', [$this, 'rewrite_attachment_url'], 10, 2);
@@ -531,13 +533,18 @@ class WPS3 implements S3StorageInterface {
     
     /**
      * Rewrite image resize URLs to point to S3.
+     *
+     * @param array|false $downsize The existing downsize result
+     * @param int $attachment_id The attachment ID
+     * @param string|array $size The requested size
+     * @return array|false The modified downsize result
      */
     public function rewrite_image_downsize($downsize, $attachment_id, $size) {
         // If already short-circuited or plugin is not enabled, return
         if ($downsize !== false || !get_option('wps3_enabled') || empty($this->s3_client)) {
             return $downsize;
         }
-
+        
         // If $size is an array (e.g., [150, 150]), let WordPress handle it.
         // Using an array as a key for $metadata['sizes'] causes a fatal error.
         if (is_array($size)) {
@@ -549,8 +556,8 @@ class WPS3 implements S3StorageInterface {
         if (empty($metadata)) {
             return $downsize;
         }
-        
-        // If size is the full size, use the attachment URL
+
+        // Handle full size image
         if ($size === 'full' || empty($metadata['sizes'][$size])) {
             $url = $this->rewrite_attachment_url(wp_get_attachment_url($attachment_id), $attachment_id);
 
@@ -563,28 +570,67 @@ class WPS3 implements S3StorageInterface {
             $height = isset($metadata['height']) ? intval($metadata['height']) : 0;
             return [$url, $width, $height, false];
         }
-        
+
         // Handle intermediate sizes
         if (isset($metadata['sizes'][$size])) {
             $size_data = $metadata['sizes'][$size];
             $attachment_path = get_post_meta($attachment_id, '_wp_attached_file', true);
             
-            if ($attachment_path) {
-                $base_dir = trailingslashit(dirname($attachment_path));
-                $size_file = $base_dir . $size_data['file'];
+            if (empty($attachment_path)) {
+                return $downsize;
+            }
+
+            $base_dir = trailingslashit(dirname($attachment_path));
+            $size_file = $base_dir . $size_data['file'];
+            
+            try {
+                $key = trim($this->bucket_folder . '/' . $size_file, '/');
                 
-                try {
-                    $key = trim($this->bucket_folder . '/' . $size_file, '/');
-                    if ($this->exists($key)) {
-                        $url = $this->generate_object_url($key);
-                        return [$url, intval($size_data['width']), intval($size_data['height']), true];
+                // Check if file exists in S3 with retry logic
+                $exists = false;
+                $attempts = 0;
+                $max_attempts = WPS3_RETRY_ATTEMPTS;
+                
+                while ($attempts < $max_attempts) {
+                    try {
+                        $exists = $this->exists($key);
+                        break;
+                    } catch (\Exception $e) {
+                        $attempts++;
+                        if ($attempts >= $max_attempts) {
+                            throw $e;
+                        }
+                        sleep(1);
                     }
-                } catch (\Exception $e) {
-                    $this->log_error($e, 'rewrite_image_downsize', [
-                        'attachment_id' => $attachment_id,
-                        'size' => $size,
-                        'size_data' => $size_data
-                    ]);
+                }
+
+                if ($exists) {
+                    $url = $this->generate_object_url($key);
+                    return [
+                        $url,
+                        intval($size_data['width']),
+                        intval($size_data['height']),
+                        true
+                    ];
+                }
+            } catch (\Exception $e) {
+                $this->log_error($e, 'rewrite_image_downsize', [
+                    'attachment_id' => $attachment_id,
+                    'size' => $size,
+                    'size_data' => $size_data,
+                    'key' => $key ?? null
+                ]);
+                
+                // Fallback to local file if available
+                $local_file = wp_upload_dir()['basedir'] . '/' . $size_file;
+                if (file_exists($local_file)) {
+                    $url = wp_upload_dir()['baseurl'] . '/' . $size_file;
+                    return [
+                        $url,
+                        intval($size_data['width']),
+                        intval($size_data['height']),
+                        true
+                    ];
                 }
             }
         }
@@ -796,20 +842,9 @@ class WPS3 implements S3StorageInterface {
             return;
         }
         
-        $this->ensure_asset_directories();
-        
-        // Create default assets if they don't exist
-        if (!file_exists(WPS3_PLUGIN_DIR . 'js/wps3-admin.js')) {
-            $this->create_default_js_file();
-        }
-        
-        if (!file_exists(WPS3_PLUGIN_DIR . 'css/wps3-admin.css')) {
-            $this->create_default_css_file();
-        }
-        
         wp_enqueue_script(
             'wps3-admin-js',
-            WPS3_PLUGIN_URL . 'js/wps3-admin.js',
+            WPS3_PLUGIN_URL . 'js/admin.js',
             ['jquery'],
             WPS3_VERSION,
             true
@@ -823,7 +858,7 @@ class WPS3 implements S3StorageInterface {
         
         wp_enqueue_style(
             'wps3-admin-css',
-            WPS3_PLUGIN_URL . 'css/wps3-admin.css',
+            WPS3_PLUGIN_URL . 'css/admin.css',
             [],
             WPS3_VERSION
         );
@@ -1003,6 +1038,47 @@ class WPS3 implements S3StorageInterface {
 
         update_option('wps3_migration_running', false);
         wp_send_json_success(['message' => 'Migration paused']);
+    }
+
+    public function ajax_reset_migration() {
+        if (!check_ajax_referer('wps3_ajax_nonce', 'nonce', false) || !current_user_can('manage_options')) {
+            wp_send_json_error('Security check failed');
+        }
+
+        // Reset migration options
+        update_option('wps3_migrated_files', 0);
+        update_option('wps3_migration_running', false);
+
+        wp_send_json_success(['message' => 'Migration reset']);
+    }
+
+    public function ajax_update_option() {
+        if (!check_ajax_referer('wps3_ajax_nonce', 'nonce', false) || !current_user_can('manage_options')) {
+            wp_send_json_error('Security check failed');
+        }
+
+        $option_name = sanitize_text_field($_POST['option_name'] ?? '');
+        $option_value = sanitize_text_field($_POST['option_value'] ?? '');
+
+        // Only allow updating specific WPS3 options
+        $allowed_options = [
+            'wps3_migration_running',
+            'wps3_migrated_files'
+        ];
+
+        if (!in_array($option_name, $allowed_options)) {
+            wp_send_json_error('Invalid option name');
+        }
+
+        // Convert string 'false' to boolean false
+        if ($option_value === 'false') {
+            $option_value = false;
+        } elseif ($option_value === 'true') {
+            $option_value = true;
+        }
+
+        update_option($option_name, $option_value);
+        wp_send_json_success(['message' => 'Option updated successfully']);
     }
 
     /**
