@@ -1,6 +1,7 @@
-=== WPS3 ===
-Contributors: amrvignesh
-Tags: s3, storage, uploads, aws, cloud
+=== WPS3 - S3 Uploads Offloader ===
+Contributors: vigneshes
+Donate link: https://gigillion.com/wps3
+Tags: s3, uploads, offload, storage, aws, digitalocean, spaces
 Requires at least: 5.0
 Tested up to: 6.4
 Requires PHP: 7.0
@@ -8,88 +9,105 @@ Stable tag: 0.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Offload WordPress uploads directory to S3 compatible storage.
+Offload WordPress uploads directory to S3 compatible storage services like AWS S3, DigitalOcean Spaces, and more.
 
 == Description ==
 
-WPS3 is a WordPress plugin that allows you to offload your media uploads to any S3-compatible storage service. This includes Amazon S3, DigitalOcean Spaces, MinIO, and other S3-compatible services.
+WPS3 is a powerful WordPress plugin that automatically offloads your media uploads to S3-compatible storage services. This helps reduce server storage usage and improves website performance by serving media files from a CDN-capable storage service.
 
 = Features =
 
-* Offload media uploads to S3-compatible storage
-* Support for custom S3 endpoints
-* Automatic URL rewriting
-* Migration tool for existing files
-* Progress tracking and logging
-* Error handling and recovery
-* Batch processing for large migrations
+* Automatically upload new media files to S3-compatible storage
+* Migrate existing media files to S3 storage
+* Support for AWS S3, DigitalOcean Spaces, and other S3-compatible services
+* Configurable folder structure within your bucket
+* Optional deletion of local files after successful upload
+* Bulk migration tool with progress tracking
+* Seamless URL rewriting for media files
+* Support for all WordPress image sizes
+
+= Supported Storage Services =
+
+* Amazon S3
+* DigitalOcean Spaces
+* Linode Object Storage
+* Wasabi Hot Cloud Storage
+* Any S3-compatible storage service
 
 = Requirements =
 
-* PHP 7.0 or higher
-* WordPress 5.0 or higher
-* S3-compatible storage service
-* AWS SDK for PHP
+* WordPress 5.0 or later
+* PHP 7.0 or later
+* S3-compatible storage account
+* Basic server configuration knowledge
 
 == Installation ==
 
-1. Upload the `wps3` folder to the `/wp-content/plugins/` directory
-2. Activate the plugin through the 'Plugins' menu in WordPress
-3. Go to Settings > S3 Uploads Offloader to configure your S3 settings
+1. Upload the plugin files to the `/wp-content/plugins/wps3` directory, or install the plugin through the WordPress plugins screen directly.
+2. Activate the plugin through the 'Plugins' screen in WordPress.
+3. Navigate to Settings > WPS3 to configure your S3 settings.
+4. Enter your storage credentials and bucket information.
+5. Test the connection and enable the plugin.
+6. Use the migration tool to move existing files to S3 storage.
 
 == Frequently Asked Questions ==
 
-= What S3-compatible services are supported? =
+= Does this plugin work with AWS S3? =
 
-The plugin supports any service that is compatible with the S3 API, including:
-* Amazon S3
-* DigitalOcean Spaces
-* MinIO
-* Backblaze B2
-* Wasabi
-* And more...
+Yes, this plugin works with AWS S3 and any S3-compatible storage service.
 
-= Do I need to keep local files? =
+= Will my existing images be moved to S3? =
 
-You can choose to delete local files after they are uploaded to S3. This is configurable in the plugin settings.
+Yes, you can use the built-in migration tool to move existing media files to your S3 bucket.
 
-= How do I migrate existing files? =
+= What happens if my S3 service is down? =
 
-Use the S3 Migration tool under the Media menu to migrate your existing files to S3.
+The plugin includes fallback mechanisms. If S3 is unavailable, WordPress will attempt to serve files locally if they exist.
+
+= Can I use a custom domain/CDN? =
+
+Yes, you can configure a custom endpoint URL that points to your CDN or custom domain.
+
+= Is this plugin compatible with image optimization plugins? =
+
+Yes, the plugin works with most image optimization plugins as it hooks into WordPress's standard upload process.
 
 == Screenshots ==
 
 1. Plugin settings page
 2. Migration tool interface
-3. Progress tracking
+3. S3 configuration options
 
 == Changelog ==
 
 = 0.2 =
-* Added migration tool
-* Added progress tracking
-* Added error handling
-* Added logging system
-* Added batch processing
+* Added comprehensive error handling and logging
+* Improved security with proper nonce verification
+* Added bulk migration tool with progress tracking
+* Enhanced S3 client configuration options
+* Added support for custom endpoints
+* Improved accessibility and user interface
+* Added proper input sanitization and validation
+* Fixed asset file loading issues
 
 = 0.1 =
 * Initial release
+* Basic S3 upload functionality
+* Settings page for configuration
 
 == Upgrade Notice ==
 
 = 0.2 =
-This version adds a migration tool, progress tracking, and improved error handling.
+This version includes important security improvements and new features. Please update your settings after upgrading.
 
-== Developer Documentation ==
+== Security ==
 
-The plugin provides several hooks for developers:
+This plugin follows WordPress security best practices:
+* All user inputs are properly sanitized and validated
+* CSRF protection using WordPress nonces
+* Capability checks for admin functions
+* Secure storage of sensitive credentials
 
-= Actions =
+== Support ==
 
-* `wps3_before_upload` - Fires before a file is uploaded to S3
-* `wps3_after_upload` - Fires after a file is uploaded to S3
-
-= Filters =
-
-* `wps3_upload_options` - Modify upload options before sending to S3
-* `wps3_file_url` - Modify the URL of a file stored in S3 
+For support and documentation, please visit our [GitHub repository](https://github.com/amrvignesh/wps3) or contact us through the WordPress.org support forums.

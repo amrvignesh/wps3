@@ -1,3 +1,30 @@
+// Add missing function to fix JavaScript error
+function performAjaxRequest(action, data, beforeSend, success, error) {
+    if (beforeSend && typeof beforeSend === 'function') {
+        beforeSend();
+    }
+    
+    $.ajax({
+        url: wps3_ajax.ajax_url,
+        type: 'POST',
+        data: {
+            action: action,
+            nonce: wps3_ajax.nonce,
+            ...data
+        },
+        success: function(response) {
+            if (success && typeof success === 'function') {
+                success(response);
+            }
+        },
+        error: function(xhr, status, errorThrown) {
+            if (error && typeof error === 'function') {
+                error(xhr, status, errorThrown);
+            }
+        }
+    });
+}
+
 jQuery(document).ready(function($) {
     const STATUS_CHECK_INTERVAL = 5000; // 5 seconds
     let statusCheckTimer = null;
@@ -304,4 +331,4 @@ jQuery(document).ready(function($) {
     
     // Check initial status on page load
     checkStatus();
-}); 
+});
