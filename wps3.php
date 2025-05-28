@@ -29,7 +29,7 @@ define( 'WPS3_RETRY_ATTEMPTS', 3 );
 define( 'WPS3_TIMEOUT', 30 );
 define( 'WPS3_PROCESS_BATCH_DELAY', 1000 ); // Delay between batch processing in milliseconds
 
-require_once 'aws/aws-autoloader.php';
+require_once 'vendor/aws/aws-autoloader.php';
 require_once ABSPATH . 'wp-admin/includes/plugin.php';
 require_once ABSPATH . 'wp-admin/includes/file.php';
 require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -103,7 +103,7 @@ class WPS3 implements S3StorageInterface {
 	 *
 	 * @var string
 	 */
-	protected $bucket_region;
+	protected $bucket_region; // Ensure this property exists
 
 	/**
 	 * The S3 bucket folder.
@@ -130,68 +130,33 @@ class WPS3 implements S3StorageInterface {
 	 * The constructor.
 	 */
 	public function __construct() {
-		// Parse the S3 path into components
-		$this->parse_s3_path( get_option( 'wps3_s3_path' ) );
+		// Fetch S3 configuration options
+		$this->endpoint = get_option( 'wps3_s3_endpoint_url' );
+		$this->bucket_name = get_option( 'wps3_bucket_name' );
+		$this->bucket_folder = get_option( 'wps3_bucket_folder', '' ); // Default to empty if not set
+		$this->bucket_region = get_option( 'wps3_s3_region' ); // Fetch the S3 region
 
 		// Initialize S3 client if we have the necessary configuration
-		if ( ! empty( $this->bucket_region ) ) {
+		if ( ! empty( $this->endpoint ) && ! empty( $this->bucket_name ) && ! empty( $this->bucket_region ) ) { // Check for bucket_region
 			$config = array(
 				'version'     => 'latest',
-				'region'      => $this->bucket_region,
+				'region'      => $this->bucket_region, // Use the fetched S3 region
+				'endpoint'    => $this->endpoint,
 				'credentials' => array(
 					'key'    => get_option( 'wps3_access_key' ),
 					'secret' => get_option( 'wps3_secret_key' ),
 				),
+				'use_path_style_endpoint' => true, // Important for S3-compatible services
 			);
 
-			// Add custom endpoint if provided
-			if ( ! empty( $this->endpoint ) ) {
-				$config['endpoint'] = $this->endpoint;
-			}
-
 			try {
+				// Corrected S3Client instantiation
 				$this->s3_client = new \Aws\S3\S3Client( $config );
-			} catch ( \Exception $e ) {
+			} catch ( \Exception $e ) { 
 				// Log the error but don't crash
 				error_log( 'WPS3: Error initializing S3 client: ' . $e->getMessage() );
 			}
 		}
-	}
-
-	/**
-	 * Parse the S3 path into components.
-	 * 
-	 * @param string $s3_path The S3 path in the format 's3://bucket-name/folder-path?region=region-name&endpoint=custom-endpoint'
-	 * @return void
-	 */
-	protected function parse_s3_path($s3_path)
-	{
-		if (empty($s3_path)) {
-			return;
-		}
-
-		// Remove the s3:// prefix if present
-		$s3_path = preg_replace('/^s3:\/\//', '', $s3_path);
-
-		// Extract query parameters if they exist
-		$parts = explode('?', $s3_path, 2);
-		$path = $parts[0];
-		$query = isset($parts[1]) ? $parts[1] : '';
-
-		// Parse the path to get bucket name and folder
-		$path_parts = explode('/', $path, 2);
-		$this->bucket_name = $path_parts[0];
-		$this->bucket_folder = isset($path_parts[1]) ? $path_parts[1] : '';
-
-		// Parse query parameters
-		$params = [];
-		if (!empty($query)) {
-			parse_str($query, $params);
-		}
-
-		// Extract region and endpoint from query parameters
-		$this->bucket_region = isset($params['region']) ? sanitize_text_field($params['region']) : '';
-		$this->endpoint = isset($params['endpoint']) ? esc_url_raw($params['endpoint']) : '';
 	}
 
 	/**
@@ -217,10 +182,17 @@ class WPS3 implements S3StorageInterface {
 		add_action('wp_ajax_wps3_update_option', [$this, 'ajax_update_option']);
 		add_action('wp_ajax_wps3_pause_migration', [$this, 'ajax_pause_migration']);
 		
-		// Filters for rewriting URLs
-		add_filter('wp_get_attachment_url', [$this, 'rewrite_attachment_url'], 10, 2);
-		add_filter('image_downsize', [$this, 'rewrite_image_downsize'], 10, 3);
+		// Filters for rewriting URLs - Increased priority to 99
+		add_filter('wp_get_attachment_url', [$this, 'rewrite_attachment_url'], 99, 2);
+		add_filter('image_downsize', [$this, 'rewrite_image_downsize'], 99, 3);
 		add_filter('wp_handle_upload', [$this, 'upload_overrides']);
+		
+		// Additional filters for media library interface
+		add_filter('attachment_link', [$this, 'rewrite_attachment_url'], 99, 2);
+		add_filter('wp_get_attachment_image_src', [$this, 'rewrite_image_src'], 99, 4);
+		add_filter('wp_calculate_image_srcset', [$this, 'rewrite_srcset'], 99, 5);
+		add_filter('wp_get_attachment_thumb_url', [$this, 'rewrite_attachment_url'], 99, 2);
+		add_filter('wp_get_attachment_image_attributes', [$this, 'rewrite_image_attributes'], 99, 3);
 	}
 
 	/**
@@ -246,6 +218,14 @@ class WPS3 implements S3StorageInterface {
 
 		// Check if S3 client is properly initialized
 		if (empty($this->s3_client)) {
+			// Display an admin notice if the S3 client failed to initialize due to missing configuration
+			if ( empty( $this->endpoint ) || empty( $this->bucket_name ) || empty( $this->bucket_region ) ) {
+				add_action('admin_notices', function() {
+					echo '<div class="error"><p>';
+					echo esc_html__('WPS3: S3 client could not be initialized. Please ensure Endpoint URL, Bucket Name, and S3 Region are correctly configured in settings.', 'wps3');
+					echo '</p></div>';
+				});
+			}
 			return;
 		}
 
@@ -261,6 +241,16 @@ class WPS3 implements S3StorageInterface {
 			}
 		} catch (\Exception $e) {
 			error_log('WPS3: Error checking bucket existence: ' . $e->getMessage());
+			// Display a generic error if bucket check fails for other reasons
+			add_action('admin_notices', function() use ($e) {
+				echo '<div class="error"><p>';
+				printf(
+					/* translators: %s: Error message */
+					esc_html__('WPS3: Error connecting to S3 provider: %s. Please check your S3 settings and network connectivity.', 'wps3'),
+					esc_html($e->getMessage())
+				);
+				echo '</p></div>';
+			});
 			return;
 		}
 	}
@@ -291,12 +281,20 @@ class WPS3 implements S3StorageInterface {
 		}
 
 		try {
-			$key = $this->bucket_folder . '/' . basename($file);
+			$file_basename = basename($file);
+			$key_parts = [];
+			if (!empty($this->bucket_folder)) {
+				$key_parts[] = trim($this->bucket_folder, '/');
+			}
+			$key_parts[] = $file_basename;
+			$key = implode('/', $key_parts);
+			
 			$this->s3_client->putObject([
 				'Bucket' => $this->bucket_name,
 				'Key' => $key,
-				'Body' => file_get_contents($file),
+				'Body' => fopen($file, 'r'), // Use fopen for better memory management with large files
 				'ACL' => 'public-read',
+				'ContentType' => $this->get_mime_type($file),
 			]);
 
 			// Delete the local file if that option is enabled
@@ -305,8 +303,8 @@ class WPS3 implements S3StorageInterface {
 			}
 
 			return true;
-		} catch (\Exception $e) {
-			error_log('S3 upload error: ' . $e->getMessage());
+		} catch ( \Exception $e) { // Corrected: Single backslash for root namespace Exception
+			error_log('S3 upload error for file ' . $file . ': ' . $e->getMessage());
 			return false;
 		}
 	}
@@ -314,37 +312,40 @@ class WPS3 implements S3StorageInterface {
 	/**
 	 * Override the WordPress upload process to upload files to the S3 bucket.
 	 */
-	public function upload_overrides($file)
+	public function upload_overrides($file_data) // Parameter changed from $file to $file_data for clarity
 	{
 		// Check if the plugin is enabled.
-		if (!get_option('wps3_enabled')) {
-			return $file;
+		if (!get_option('wps3_enabled') || empty($this->s3_client)) {
+			return $file_data;
 		}
 
 		// Upload the file to S3
-		$this->upload_file($file['file']);
+		$upload_success = $this->upload_file($file_data['file']);
 		
-		// Generate the S3 URL for the file
-		$upload_dir = wp_upload_dir();
-		$s3_url = '';
-		
-		// If we have a custom endpoint, use it for the URL
-		if (!empty($this->endpoint)) {
-			$s3_url = $this->endpoint . '/' . $this->bucket_name . '/' . $this->bucket_folder . '/' . basename($file['file']);
-		} else {
-			// Standard AWS S3 URL format
-			$s3_url = 'https://' . $this->bucket_name . '.s3.' . $this->bucket_region . '.amazonaws.com/' . $this->bucket_folder . '/' . basename($file['file']);
-		}
-		
-		// Update the file info with S3 data
-		$file['url'] = $s3_url;
-		$file['s3_info'] = array(
-			'bucket' => $this->bucket_name,
-			'key' => $this->bucket_folder . '/' . basename($file['file']),
-			'url' => $s3_url,
-		);
+		if ($upload_success) {
+			$file_basename = basename($file_data['file']);
+			$key_parts = [];
+			if (!empty($this->bucket_folder)) {
+				$key_parts[] = trim($this->bucket_folder, '/');
+			}
+			$key_parts[] = $file_basename;
+			$s3_object_key = implode('/', $key_parts);
 
-		return $file;
+			$s3_url = $this->get_s3_url($s3_object_key);
+			
+			// Update the file info with S3 data
+			$file_data['url'] = $s3_url;
+			$file_data['s3_info'] = array(
+				'bucket' => $this->bucket_name,
+				'key'    => $s3_object_key,
+				'url'    => $s3_url,
+			);
+		} else {
+			// Handle upload failure? For now, return original data.
+			// WordPress will store it locally.
+		}
+
+		return $file_data;
 	}
 
 	/**
@@ -354,13 +355,53 @@ class WPS3 implements S3StorageInterface {
 	 */
 	public function delete_attachment($attachment_id)
 	{
-		$attachment = get_post_meta($attachment_id, '_wp_attached_file', true);
+		if (empty($this->s3_client) || empty($this->bucket_name)) {
+			return;
+		}
+		$attachment_meta = get_post_meta($attachment_id, '_wp_attached_file', true);
 
-		if (!empty($attachment)) {
-			$this->s3_client->deleteObject([
-				'Bucket' => $this->bucket_name,
-				'Key' => $this->bucket_folder . '/' . basename($attachment),
-			]);
+		if (!empty($attachment_meta)) {
+			$file_basename = basename($attachment_meta);
+			$key_parts = [];
+			if (!empty($this->bucket_folder)) {
+				$key_parts[] = trim($this->bucket_folder, '/');
+			}
+			$key_parts[] = $file_basename;
+			$s3_object_key = implode('/', $key_parts);
+			
+			try {
+				$this->s3_client->deleteObject([
+					'Bucket' => $this->bucket_name,
+					'Key'    => $s3_object_key,
+				]);
+
+				// Also delete thumbnails/intermediate sizes from S3
+				$metadata = wp_get_attachment_metadata($attachment_id);
+				if (isset($metadata['sizes']) && is_array($metadata['sizes'])) {
+					foreach ($metadata['sizes'] as $size_info) {
+						$thumbnail_basename = $size_info['file'];
+						$thumb_key_parts = [];
+						if (!empty($this->bucket_folder)) {
+							$thumb_key_parts[] = trim($this->bucket_folder, '/');
+						}
+						// If original file was in a year/month subfolder, thumbnails are too.
+						// dirname($attachment_meta) will give that path relative to uploads folder.
+						$original_file_dir = dirname($attachment_meta);
+						if ($original_file_dir !== '.') {
+							$thumb_key_parts[] = $original_file_dir;
+						}
+						$thumb_key_parts[] = $thumbnail_basename;
+						$s3_thumb_key = implode('/', array_filter($thumb_key_parts));
+						
+						$this->s3_client->deleteObject([
+							'Bucket' => $this->bucket_name,
+							'Key'    => $s3_thumb_key,
+						]);
+					}
+				}
+			} catch ( \Exception $e) { // Corrected: Single backslash for root namespace Exception
+				error_log('WPS3: Error deleting attachment ' . $attachment_id . ' from S3: ' . $e->getMessage());
+			}
 		}
 	}
 
@@ -409,30 +450,55 @@ class WPS3 implements S3StorageInterface {
 	public function register_settings() {
 		add_settings_section(
 			'wps3_section',
-			__('S3 Uploads Offloader', 'wps3'),
+			__( 'S3 Uploads Offloader', 'wps3' ),
 			[$this, 'settings_section_callback'],
 			'wps3'
 		);
 
 		add_settings_field(
 			'wps3_enabled',
-			__('Enable S3 Uploads Offloader', 'wps3'),
+			__( 'Enable S3 Uploads Offloader', 'wps3' ),
 			[$this, 'settings_field_enabled_callback'],
 			'wps3',
 			'wps3_section'
 		);
 
 		add_settings_field(
-			'wps3_s3_path',
-			__('S3 Storage Path', 'wps3'),
-			[$this, 'settings_field_s3_path_callback'],
+			'wps3_s3_endpoint_url',
+			__( 'S3 Endpoint URL', 'wps3' ),
+			[$this, 'settings_field_s3_endpoint_url_callback'],
+			'wps3',
+			'wps3_section'
+		);
+
+		add_settings_field(
+			'wps3_bucket_name',
+			__( 'Bucket Name', 'wps3' ),
+			[$this, 'settings_field_bucket_name_callback'],
+			'wps3',
+			'wps3_section'
+		);
+		
+		add_settings_field(
+			'wps3_bucket_folder',
+			__( 'Bucket Folder (Optional)', 'wps3' ),
+			[$this, 'settings_field_bucket_folder_callback'],
+			'wps3',
+			'wps3_section'
+		);
+
+		// Re-add settings_field for wps3_s3_region
+		add_settings_field(
+			'wps3_s3_region',
+			__( 'S3 Region', 'wps3' ),
+			[$this, 'settings_field_s3_region_callback'], // Ensure this callback exists
 			'wps3',
 			'wps3_section'
 		);
 
 		add_settings_field(
 			'wps3_access_key',
-			__('Access Key', 'wps3'),
+			__( 'Access Key', 'wps3' ),
 			[$this, 'settings_field_access_key_callback'],
 			'wps3',
 			'wps3_section'
@@ -440,45 +506,38 @@ class WPS3 implements S3StorageInterface {
 
 		add_settings_field(
 			'wps3_secret_key',
-			__('Secret Key', 'wps3'),
+			__( 'Secret Key', 'wps3' ),
 			[$this, 'settings_field_secret_key_callback'],
 			'wps3',
 			'wps3_section'
 		);
 
 		add_settings_field(
+			'wps3_cdn_domain',
+			__( 'CDN Domain', 'wps3' ),
+			[$this, 'settings_field_cdn_domain_callback'],
+			'wps3',
+			'wps3_section'
+		);
+
+		add_settings_field(
 			'wps3_delete_local',
-			__('Delete Local Files', 'wps3'),
+			__( 'Delete Local Files', 'wps3' ),
 			[$this, 'settings_field_delete_local_callback'],
 			'wps3',
 			'wps3_section'
 		);
 
-		register_setting(
-			'wps3',
-			'wps3_enabled'
-		);
-
-		register_setting(
-			'wps3',
-			'wps3_s3_path',
-			[$this, 'validate_s3_path']
-		);
-
-		register_setting(
-			'wps3',
-			'wps3_access_key'
-		);
-
-		register_setting(
-			'wps3',
-			'wps3_secret_key'
-		);
-
-		register_setting(
-			'wps3',
-			'wps3_delete_local'
-		);
+		register_setting('wps3', 'wps3_enabled');
+		register_setting('wps3', 'wps3_s3_endpoint_url', [$this, 'validate_s3_endpoint_url']);
+		register_setting('wps3', 'wps3_bucket_name', [$this, 'validate_bucket_name']);
+		register_setting('wps3', 'wps3_bucket_folder', [$this, 'validate_bucket_folder']);
+		// Re-add register_setting for wps3_s3_region
+		register_setting('wps3', 'wps3_s3_region', [$this, 'validate_s3_region']); // Ensure this validation function exists
+		register_setting('wps3', 'wps3_access_key');
+		register_setting('wps3', 'wps3_secret_key');
+		register_setting('wps3', 'wps3_cdn_domain', [$this, 'validate_cdn_domain']);
+		register_setting('wps3', 'wps3_delete_local');
 	}
 
 	/**
@@ -518,17 +577,49 @@ class WPS3 implements S3StorageInterface {
 	}
 
 	/**
-	 * Render the S3 path settings field.
+	 * Render the S3 Endpoint URL settings field.
 	 */
-	public function settings_field_s3_path_callback() {
+	public function settings_field_s3_endpoint_url_callback() {
 		?>
-		<input type="text" name="wps3_s3_path" value="<?php echo esc_attr(get_option('wps3_s3_path')); ?>" class="regular-text" />
+		<input type="text" name="wps3_s3_endpoint_url" value="<?php echo esc_attr(get_option('wps3_s3_endpoint_url')); ?>" class="regular-text" placeholder="e.g., https://s3.example.com" />
 		<p class="description">
-			<?php _e('Enter the S3 path in the format: <code>s3://bucket-name/folder-path?region=region-name&endpoint=custom-endpoint</code>', 'wps3'); ?>
-			<br>
-			<?php _e('Example for AWS S3: <code>s3://my-bucket/wp-uploads?region=us-west-2</code>', 'wps3'); ?>
-			<br>
-			<?php _e('Example for custom S3 provider: <code>s3://my-bucket/wp-uploads?region=us-east-1&endpoint=https://s3.example.com</code>', 'wps3'); ?>
+			<?php _e('Enter the S3 endpoint URL. For AWS S3, this might be like <code>https://s3.your-region.amazonaws.com</code>. For other services, refer to their documentation (e.g., <code>https://us-central-1.telnyxstorage.com</code>).', 'wps3'); ?>
+		</p>
+		<?php
+	}
+
+	/**
+	 * Render the Bucket Name settings field.
+	 */
+	public function settings_field_bucket_name_callback() {
+		?>
+		<input type="text" name="wps3_bucket_name" value="<?php echo esc_attr(get_option('wps3_bucket_name')); ?>" class="regular-text" placeholder="e.g., my-wordpress-bucket" />
+		<p class="description">
+			<?php _e('Enter your S3 bucket name.', 'wps3'); ?>
+		</p>
+		<?php
+	}
+	
+	/**
+	 * Render the Bucket Folder settings field.
+	 */
+	public function settings_field_bucket_folder_callback() {
+		?>
+		<input type="text" name="wps3_bucket_folder" value="<?php echo esc_attr(get_option('wps3_bucket_folder')); ?>" class="regular-text" placeholder="e.g., wp-content/uploads" />
+		<p class="description">
+			<?php _e('Optional. Enter a folder path within your bucket to store uploads. Leave blank to use the bucket root.', 'wps3'); ?>
+		</p>
+		<?php
+	}
+
+	/**
+	 * Render the S3 Region settings field.
+	 */
+	public function settings_field_s3_region_callback() { // Re-add this callback method
+		?>
+		<input type="text" name="wps3_s3_region" value="<?php echo esc_attr(get_option('wps3_s3_region')); ?>" class="regular-text" placeholder="e.g., us-west-2" />
+		<p class="description">
+			<?php _e('Enter the S3 region for your bucket (e.g., <code>us-west-2</code>, <code>eu-central-1</code>). This is required by some S3-compatible providers.', 'wps3'); ?>
 		</p>
 		<?php
 	}
@@ -558,33 +649,86 @@ class WPS3 implements S3StorageInterface {
 	}
 
 	/**
-	 * Validate the S3 path.
-	 *
-	 * @param string $value The S3 path value.
-	 * @return string The validated S3 path.
+	 * Render the CDN domain settings field.
 	 */
-	public function validate_s3_path($value) {
-		if (empty($value)) {
-			add_settings_error(
-				'wps3_s3_path',
-				'empty',
-				__('Please enter a value for the S3 Storage Path.', 'wps3')
-			);
-			return '';
-		}
-
-		// Basic validation that the path contains at least a bucket name
-		if (!preg_match('/^s3:\/\/[a-zA-Z0-9.-]+/', $value)) {
-			add_settings_error(
-				'wps3_s3_path',
-				'invalid',
-				__('The S3 Storage Path should start with s3:// followed by a bucket name.', 'wps3')
-			);
-		}
-
-		return $value;
+	public function settings_field_cdn_domain_callback() {
+		?>
+		<input type="text" name="wps3_cdn_domain" value="<?php echo esc_attr(get_option('wps3_cdn_domain')); ?>" class="regular-text" placeholder="e.g., cdn.example.com" />
+		<p class="description">
+			<?php _e('Enter your CDN domain name if you are using a CDN to serve your S3 files. Leave blank if not using a CDN.', 'wps3'); ?>
+		</p>
+		<?php
 	}
 
+	/**
+	 * Validate the S3 Endpoint URL.
+	 * @param string $value The S3 endpoint URL value.
+	 * @return string The validated S3 endpoint URL.
+	 */
+	public function validate_s3_endpoint_url($value) {
+		if (empty($value)) {
+			add_settings_error('wps3_s3_endpoint_url', 'empty', __('Please enter the S3 Endpoint URL.', 'wps3'));
+			return '';
+		}
+		if (!filter_var($value, FILTER_VALIDATE_URL)) {
+			add_settings_error('wps3_s3_endpoint_url', 'invalid', __('The S3 Endpoint URL is not a valid URL.', 'wps3'));
+			return esc_url_raw($value); // Return sanitized value even if invalid to show user
+		}
+		return esc_url_raw(rtrim($value, '/')); // Store without trailing slash
+	}
+
+	/**
+	 * Validate the Bucket Name.
+	 * @param string $value The bucket name value.
+	 * @return string The validated bucket name.
+	 */
+	public function validate_bucket_name($value) {
+		if (empty($value)) {
+			add_settings_error('wps3_bucket_name', 'empty', __('Please enter the Bucket Name.', 'wps3'));
+			return '';
+		}
+		// Basic S3 bucket naming rules (simplified): 3-63 chars, lowercase, numbers, hyphens, dots (not at start/end)
+		if (!preg_match('/^(?=.{3,63}$)[a-z0-9][a-z0-9.-]*[a-z0-9]$/', $value)) {
+			add_settings_error('wps3_bucket_name', 'invalid', __('The Bucket Name is not valid. It should be 3-63 characters, lowercase letters, numbers, dots, and hyphens.', 'wps3'));
+		}
+		return sanitize_text_field($value);
+	}
+
+	/**
+	 * Validate the Bucket Folder.
+	 * @param string $value The bucket folder value.
+	 * @return string The validated bucket folder.
+	 */
+	public function validate_bucket_folder($value) {
+		// Optional field. If provided, sanitize. Remove leading/trailing slashes.
+		if (!empty($value)) {
+			return trim(sanitize_text_field($value), '/');
+		}
+		return ''; // Return empty if not provided
+	}
+
+	/**
+	 * Validate the S3 Region.
+	 * @param string $value The S3 region value.
+	 * @return string The validated S3 region.
+	 */
+	public function validate_s3_region($value) { // Re-add this validation method
+		if (empty($value)) {
+			add_settings_error('wps3_s3_region', 'empty', __('Please enter the S3 Region.', 'wps3'));
+			// Return current value to avoid clearing the field on error, or '' if you prefer to clear it.
+			// For consistency with other validation, let's return '' to indicate an error and clear.
+			return ''; 
+		}
+		// Basic validation for region format (lowercase letters, numbers, hyphens)
+		if (!preg_match('/^[a-z0-9-]+$/', $value)) {
+			add_settings_error('wps3_s3_region', 'invalid', __('The S3 Region is not valid (e.g., us-west-2).', 'wps3'));
+			// Return the sanitized input to show the user what they typed, even if invalid.
+			// Or return get_option('wps3_s3_region') to revert to the previously saved valid value.
+			// For now, let's return the sanitized input.
+		}
+		return sanitize_text_field($value);
+	}
+	
 	/**
 	 * Render the settings page.
 	 */
@@ -616,20 +760,20 @@ class WPS3 implements S3StorageInterface {
 		$this->ensure_asset_directories();
 		
 		// Create JS file if it doesn't exist
-		$js_file = plugin_dir_path(__FILE__) . 'js/wps3-admin.js';
+		$js_file = plugin_dir_path(__FILE__) . 'assets/js/admin.js';
 		if (!file_exists($js_file)) {
 			$this->create_default_js_file();
 		}
 		
 		// Create CSS file if it doesn't exist
-		$css_file = plugin_dir_path(__FILE__) . 'css/wps3-admin.css';
+		$css_file = plugin_dir_path(__FILE__) . 'assets/css/admin.css';
 		if (!file_exists($css_file)) {
 			$this->create_default_css_file();
 		}
 		
 		wp_enqueue_script(
 			'wps3-admin-js',
-			plugin_dir_url(__FILE__) . 'js/wps3-admin.js',
+			plugin_dir_url(__FILE__) . 'assets/js/admin.js',
 			['jquery'],
 			'1.0.0',
 			true
@@ -647,7 +791,7 @@ class WPS3 implements S3StorageInterface {
 		
 		wp_enqueue_style(
 			'wps3-admin-css',
-			plugin_dir_url(__FILE__) . 'css/wps3-admin.css',
+			plugin_dir_url(__FILE__) . 'assets/css/admin.css',
 			[],
 			'1.0.0'
 		);
@@ -676,7 +820,7 @@ class WPS3 implements S3StorageInterface {
 	 */
 	private function create_default_js_file()
 	{
-		$js_file = plugin_dir_path(__FILE__) . 'js/wps3-admin.js';
+		$js_file = plugin_dir_path(__FILE__) . 'assets/js/admin.js';
 		$js_content = <<<'JS'
 jQuery(document).ready(function($) {
     const STATUS_CHECK_INTERVAL = 5000; // 5 seconds
@@ -1012,7 +1156,7 @@ JS;
 	 */
 	private function create_default_css_file()
 	{
-		$css_file = plugin_dir_path(__FILE__) . 'css/wps3-admin.css';
+		$css_file = plugin_dir_path(__FILE__) . 'assets/css/admin.css';
 		$css_content = <<<'CSS'
 .wps3-migration-status {
     margin-top: 20px;
@@ -1357,10 +1501,14 @@ CSS;
 	public static function activate() {
 		// Add default options
 		add_option('wps3_enabled', false);
-		add_option('wps3_delete_local', false);
-		add_option('wps3_s3_path', '');
+		add_option('wps3_s3_endpoint_url', '');
+		add_option('wps3_bucket_name', '');
+		add_option('wps3_bucket_folder', '');
+		add_option('wps3_s3_region', ''); // Re-add option
 		add_option('wps3_access_key', '');
 		add_option('wps3_secret_key', '');
+		add_option('wps3_cdn_domain', '');
+		add_option('wps3_delete_local', false);
 		add_option('wps3_migrated_files', 0);
 		add_option('wps3_migration_running', false);
 		add_option('wps3_migration_file_list', []);
@@ -1400,10 +1548,14 @@ CSS;
 	public static function uninstall() {
 		// Remove all plugin options
 		delete_option('wps3_enabled');
-		delete_option('wps3_delete_local');
-		delete_option('wps3_s3_path');
+		delete_option('wps3_s3_endpoint_url');
+		delete_option('wps3_bucket_name');
+		delete_option('wps3_bucket_folder');
+		delete_option('wps3_s3_region'); // Re-add option for deletion
 		delete_option('wps3_access_key');
 		delete_option('wps3_secret_key');
+		delete_option('wps3_cdn_domain');
+		delete_option('wps3_delete_local');
 		delete_option('wps3_migrated_files');
 		delete_option('wps3_migration_running');
 		delete_option('wps3_migration_file_list');
@@ -1423,112 +1575,115 @@ CSS;
 	 */
 	public function rewrite_attachment_url($url, $attachment_id)
 	{
-		// If plugin is not enabled, return the original URL
-		if (!get_option('wps3_enabled')) {
+		// Check if the plugin is enabled and S3 client is initialized
+		if (!get_option('wps3_enabled') || empty($this->s3_client)) {
+			// If not enabled or client not ready, log why and return original URL
+			// Optional: Add error_log here for debugging if needed in the future
+			// if (!get_option('wps3_enabled')) {
+			// error_log("WPS3 rewrite_attachment_url: Plugin not enabled for attachment ID $attachment_id.");
+			// }
+			// if (empty($this->s3_client)) {
+			// error_log("WPS3 rewrite_attachment_url: S3 client not initialized for attachment ID $attachment_id.");
+			// }
 			return $url;
 		}
-		
-		// Check if S3 client is configured
-		if (empty($this->s3_client)) {
-			return $url;
-		}
-		
-		// Get the attachment file path
-		$attachment_file = get_post_meta($attachment_id, '_wp_attached_file', true);
-		if (empty($attachment_file)) {
-			return $url;
-		}
-		
-		// Check if the attachment exists in S3
-		try {
-			$key = $this->bucket_folder . '/' . basename($attachment_file);
-			$s3_exists = $this->s3_client->doesObjectExist($this->bucket_name, $key);
-			
-			if ($s3_exists) {
-				// Generate S3 URL
-				if (!empty($this->endpoint)) {
-					// Custom endpoint
-					return esc_url($this->endpoint . '/' . $this->bucket_name . '/' . $key);
-				} else {
-					// Standard AWS S3 URL
-					return esc_url('https://' . $this->bucket_name . '.s3.' . $this->bucket_region . '.amazonaws.com/' . $key);
-				}
+
+		$s3_info = get_post_meta($attachment_id, 'wps3_s3_info', true);
+
+		if (!empty($s3_info) && isset($s3_info['key'])) {
+			$cdn_domain = get_option('wps3_cdn_domain');
+			if (!empty($cdn_domain)) {
+				// Ensure CDN domain does not have a trailing slash and key does not have a leading slash
+				$cdn_base = rtrim($cdn_domain, '/');
+				$s3_key = ltrim($s3_info['key'], '/');
+				// Corrected CDN URL construction to ensure a single slash
+				return $cdn_base . "/" . $s3_key;
+			} elseif (isset($s3_info['url']) && !empty($s3_info['url'])) {
+				// Fallback to S3 URL if CDN is not set but S3 info URL exists
+				return $s3_info['url'];
 			}
-		} catch (\Exception $e) {
-			// Log error but continue with local URL
-			error_log('WPS3: S3 URL rewrite error: ' . $e->getMessage());
+			// If only key is present, construct S3 URL
+			return $this->get_s3_url($s3_info['key']);
 		}
-		
 		return $url;
 	}
-	
+
 	/**
-	 * Rewrite image resize URLs to point to S3.
+	 * Rewrite image downsize URLs to point to S3 or CDN.
 	 *
-	 * @param array|false $downsize Whether to short-circuit the image downsize.
-	 * @param int $attachment_id The attachment ID.
-	 * @param array|string $size Requested size.
-	 * @return array|false The image downsize value.
+	 * @param bool|array $downsize Whether to short-circuit the image downsize. Default false.
+	 * @param int        $id Attachment ID for image.
+	 * @param string|array $size Either a string keyword (thumbnail, medium, large, full) or a 2-item array representing width and height in pixels, e.g. array(32,32).
+	 * @return bool|array False to continue with default behavior, or array of image data.
 	 */
-	public function rewrite_image_downsize($downsize, $attachment_id, $size)
+	public function rewrite_image_downsize($downsize, $id, $size)
 	{
-		// If already short-circuited or plugin is not enabled, return
-		if ($downsize !== false || !get_option('wps3_enabled')) {
+		// Check if the plugin is enabled and S3 client is initialized
+		if (!get_option('wps3_enabled') || empty($this->s3_client)) {
 			return $downsize;
 		}
-		
-		// Check if S3 client is configured
-		if (empty($this->s3_client)) {
-			return $downsize;
-		}
-		
-		// Get the metadata
-		$metadata = wp_get_attachment_metadata($attachment_id);
-		if (empty($metadata)) {
-			return $downsize;
-		}
-		
-		// If size is the full size, use the attachment URL
-		if ($size === 'full' || empty($metadata['sizes'][$size])) {
-			$url = $this->rewrite_attachment_url(wp_get_attachment_url($attachment_id), $attachment_id);
-			$width = isset($metadata['width']) ? intval($metadata['width']) : 0;
-			$height = isset($metadata['height']) ? intval($metadata['height']) : 0;
-			return [$url, $width, $height, false];
-		}
-		
-		// Handle intermediate sizes
-		if (isset($metadata['sizes'][$size])) {
-			$size_data = $metadata['sizes'][$size];
-			$attachment_path = get_post_meta($attachment_id, '_wp_attached_file', true);
+
+		$s3_info = get_post_meta($id, 'wps3_s3_info', true);
+		$cdn_domain = get_option('wps3_cdn_domain');
+
+		if (!empty($s3_info) && isset($s3_info['key'])) {
+			// Get the base URL (S3 or CDN) for the full-sized image first
+			// This reuses the logic from rewrite_attachment_url for the main image.
+			$full_image_url = $this->rewrite_attachment_url(wp_get_attachment_url($id), $id);
 			
-			if ($attachment_path) {
-				$base_url = trailingslashit(dirname($attachment_path));
-				$size_file = $base_url . $size_data['file'];
-				
-				try {
-					$key = $this->bucket_folder . '/' . $size_data['file'];
-					$s3_exists = $this->s3_client->doesObjectExist($this->bucket_name, $key);
+			$meta = wp_get_attachment_metadata($id);
+
+			if (is_string($size)) {
+				if (isset($meta['sizes'][$size])) {
+					$s3_key_base = dirname($s3_info['key']);
+					// Handle cases where the original key might be at the root (dirname returns '.')
+					$s3_key_base = ($s3_key_base === '.' || $s3_key_base === '/') ? '' : trailingslashit($s3_key_base);
 					
-					if ($s3_exists) {
-						// Generate S3 URL for the specific size
-						if (!empty($this->endpoint)) {
-							// Custom endpoint
-							$url = esc_url($this->endpoint . '/' . $this->bucket_name . '/' . $key);
-						} else {
-							// Standard AWS S3 URL
-							$url = esc_url('https://' . $this->bucket_name . '.s3.' . $this->bucket_region . '.amazonaws.com/' . $key);
-						}
-						
-						return [$url, intval($size_data['width']), intval($size_data['height']), true];
+					$resized_file_name = $meta['sizes'][$size]['file'];
+					$s3_resized_key = $s3_key_base . $resized_file_name;
+
+					$img_url_for_size = '';
+					if (!empty($cdn_domain)) {
+						$cdn_base = rtrim($cdn_domain, '/');
+						// Corrected CDN URL construction
+						$img_url_for_size = $cdn_base . '/' . ltrim($s3_resized_key, '/');
+					} else {
+						$img_url_for_size = $this->get_s3_url($s3_resized_key);
 					}
-				} catch (\Exception $e) {
-					// Log error but continue with WordPress default handling
-					error_log('WPS3: S3 resized image URL rewrite error: ' . $e->getMessage());
+					$width = $meta['sizes'][$size]['width'];
+					$height = $meta['sizes'][$size]['height'];
+					return array($img_url_for_size, $width, $height, true);
 				}
+				// If specific size not found, fall through to use full image URL
+			} elseif (is_array($size)) {
+				// For custom array sizes, WordPress typically uses the full image and resizes via HTML/CSS.
+				// We return the S3/CDN URL for the full image.
+				$width = isset($meta['width']) ? $meta['width'] : null;
+				$height = isset($meta['height']) ? $meta['height'] : null;
+				return array($full_image_url, $width, $height, false); // false indicates it\'s not an exact match for $size
 			}
+
+			// Fallback for full size or if specific string size not found in meta
+			$width = isset($meta['width']) ? $meta['width'] : null;
+			$height = isset($meta['height']) ? $meta['height'] : null;
+			return array($full_image_url, $width, $height, true); 
 		}
-		
+
 		return $downsize;
+	}
+
+	/**
+	 * Get the S3 URL for a given key.
+	 *
+	 * @param string $key The S3 object key.
+	 * @return string The S3 URL.
+	 */
+	protected function get_s3_url($key)
+	{
+		if (empty($this->s3_client) || empty($this->bucket_name)) {
+			return ''; // Or handle error appropriately
+		}
+		return $this->s3_client->getObjectUrl($this->bucket_name, $key);
 	}
 
 	/**
@@ -1540,33 +1695,74 @@ CSS;
 	public function upload_attachment($attachment_id)
 	{
 		// If plugin is not enabled, do nothing
-		if (!get_option('wps3_enabled')) {
-			return;
-		}
-		
-		// Check if S3 client is configured
-		if (empty($this->s3_client)) {
+		if (!get_option('wps3_enabled') || empty($this->s3_client)) {
 			return;
 		}
 		
 		// Get the file path
 		$file_path = get_attached_file($attachment_id);
 		if (empty($file_path) || !file_exists($file_path)) {
+			error_log("WPS3: File path not found for attachment ID: $attachment_id");
 			return;
 		}
 		
 		// Upload the main file
-		$this->upload_file($file_path);
+		$main_upload_success = $this->upload_file($file_path);
+
+		if (!$main_upload_success) {
+			error_log("WPS3: Failed to upload main file for attachment ID: $attachment_id, Path: $file_path");
+			// Decide if we should stop or try to update meta anyway / or with local URL
+			return; 
+		}
+		
+		// Update post meta with S3 info after successful main file upload
+		// This ensures that even if thumbnails fail, the main file URL is S3
+		$file_basename = basename($file_path);
+		$key_parts = [];
+		if (!empty($this->bucket_folder)) {
+			// If the file is in a subdirectory (e.g. year/month), include that in the S3 key
+			$upload_dir_info = wp_upload_dir();
+			$relative_path = str_replace(trailingslashit($upload_dir_info['basedir']), '', dirname($file_path));
+			$full_folder_path = trim($this->bucket_folder, '/');
+			if (!empty($relative_path) && $relative_path !== '.') {
+				$full_folder_path .= '/' . trim($relative_path, '/');
+			}
+			$key_parts[] = trim($full_folder_path, '/');
+		} else {
+			// If no bucket folder, check for year/month subdirectories from WordPress
+			$upload_dir_info = wp_upload_dir();
+			$relative_path = str_replace(trailingslashit($upload_dir_info['basedir']), '', dirname($file_path));
+			if (!empty($relative_path) && $relative_path !== '.') {
+				$key_parts[] = trim($relative_path, '/');
+			}
+		}
+		$key_parts[] = $file_basename;
+		$s3_object_key = implode('/', array_filter($key_parts)); // array_filter to remove empty parts
+
+		$s3_url = $this->get_s3_url($s3_object_key);
+		update_post_meta($attachment_id, 'wps3_s3_info', [
+			'bucket' => $this->bucket_name,
+			'key'    => $s3_object_key,
+			'url'    => $s3_url,
+		]);
 		
 		// Upload resized versions if they exist
 		$metadata = wp_get_attachment_metadata($attachment_id);
 		if (!empty($metadata['sizes'])) {
-			$base_dir = trailingslashit(dirname($file_path));
+			$upload_dir_info = wp_upload_dir();
+			// Path of the originally uploaded file, relative to WP uploads base directory
+			$original_file_relative_path = get_post_meta($attachment_id, '_wp_attached_file', true); 
+			$base_dir_for_thumbnails = trailingslashit(dirname(trailingslashit($upload_dir_info['basedir']) . $original_file_relative_path));
 			
-			foreach ($metadata['sizes'] as $size => $size_data) {
-				$size_file_path = $base_dir . $size_data['file'];
+			foreach ($metadata['sizes'] as $size_name => $size_data) {
+				$size_file_path = $base_dir_for_thumbnails . $size_data['file'];
 				if (file_exists($size_file_path)) {
-					$this->upload_file($size_file_path);
+					$thumb_upload_success = $this->upload_file($size_file_path);
+					if (!$thumb_upload_success) {
+						error_log("WPS3: Failed to upload thumbnail $size_name for attachment ID: $attachment_id, Path: $size_file_path");
+					}
+				} else {
+					error_log("WPS3: Thumbnail file not found for $size_name, attachment ID: $attachment_id, Path: $size_file_path");
 				}
 			}
 		}
@@ -1578,10 +1774,49 @@ CSS;
 	 * @throws ConfigurationException If configuration is invalid
 	 */
 	private function validate_configuration() {
-		$required = ['bucket_name', 'bucket_region', 's3_client'];
-		foreach ($required as $field) {
+		// Re-add 'bucket_region' to required fields for S3 client initialization check
+		$required_for_s3_client = ['endpoint', 'bucket_name', 'bucket_region']; 
+		$missing_for_s3_client = [];
+
+		foreach ($required_for_s3_client as $field) {
 			if (empty($this->$field)) {
-				throw new ConfigurationException("Missing required field: $field");
+				$missing_for_s3_client[] = ucfirst(str_replace('_', ' ', $field));
+			}
+		}
+
+		if (!empty($missing_for_s3_client)) {
+			$error_message = sprintf(
+				/* translators: %s: Comma-separated list of missing field names. */
+				__('WPS3: S3 client cannot be initialized. Missing required configuration: %s.', 'wps3'),
+				implode(', ', $missing_for_s3_client)
+			);
+			// This notice will be shown if init() fails due to no s3_client
+			// For direct calls to validate_configuration (e.g. before migration), throw exception
+			if (empty($this->s3_client)) { // Check if client is actually not initialized
+				throw new ConfigurationException($error_message);
+			}
+		}
+		
+		// If S3 client itself is null after attempting initialization, it means config was insufficient.
+		if (empty($this->s3_client)) {
+			// Construct a more specific message if possible, otherwise a general one.
+			$specific_missing = [];
+			if (empty($this->endpoint)) $specific_missing[] = 'S3 Endpoint URL';
+			if (empty($this->bucket_name)) $specific_missing[] = 'Bucket Name';
+			if (empty($this->bucket_region)) $specific_missing[] = 'S3 Region';
+
+			if (!empty($specific_missing)) {
+				throw new ConfigurationException(
+					sprintf(
+						/* translators: %s: Comma-separated list of missing field names. */
+						__('WPS3: S3 client initialization failed. Please provide: %s.', 'wps3'),
+						implode(', ', $specific_missing)
+					)
+				);
+			} else {
+				// This case should ideally not be hit if the constructor logic is correct,
+				// but as a fallback:
+				throw new ConfigurationException(__('WPS3: S3 client initialization failed. Please check S3 settings.', 'wps3'));
 			}
 		}
 	}
@@ -1774,7 +2009,7 @@ CSS;
 	protected function process_batch($start_position) {
 		try {
 			$files = $this->get_all_files_recursive(wp_upload_dir()['path']);
-			$total_files = count($files);
+					$total_files = count($files);
 			$batch_size = WPS3_MAX_BATCH_SIZE;
 			$end_position = min($start_position + $batch_size, $total_files);
 
@@ -1873,6 +2108,7 @@ CSS;
 		$this->create_log_table();
 		
 		$result = $wpdb->insert(
+
 			$table_name,
 			[
 				'message' => $message,
@@ -1912,7 +2148,7 @@ CSS;
 	 * @param int $limit Number of entries to retrieve
 	 * @return array Array of log entries
 	 */
-	private function get_recent_logs($limit = 100) {
+ private function get_recent_logs($limit = 100) {
 		global $wpdb;
 		
 		$table_name = $wpdb->prefix . 'wps3_logs';
@@ -1933,6 +2169,104 @@ CSS;
 		
 		$table_name = $wpdb->prefix . 'wps3_logs';
 		$wpdb->query("TRUNCATE TABLE $table_name");
+	}
+
+	/**
+	 * Rewrite image src URLs in the media library
+	 *
+	 * @param array|false $image Array of image data, or boolean false if no image.
+	 * @param int $attachment_id Image attachment ID.
+	 * @param string|array $size Requested size.
+	 * @param bool $icon Whether the image should be treated as an icon.
+	 * @return array|false Modified image data or false if no image.
+	 */
+	public function rewrite_image_src($image, $attachment_id, $size, $icon) {
+		if (!$image) {
+			return $image;
+		}
+
+		$s3_info = get_post_meta($attachment_id, 'wps3_s3_info', true);
+		if (!empty($s3_info) && isset($s3_info['key'])) {
+			$cdn_domain = get_option('wps3_cdn_domain');
+			if (!empty($cdn_domain)) {
+				$cdn_base = rtrim($cdn_domain, '/');
+				$s3_key = ltrim($s3_info['key'], '/');
+				$image[0] = $cdn_base . '/' . $s3_key;
+			} elseif (isset($s3_info['url'])) {
+				$image[0] = $s3_info['url'];
+			} else {
+				$image[0] = $this->get_s3_url($s3_info['key']);
+			}
+		}
+
+		return $image;
+	}
+
+	/**
+	 * Rewrite srcset URLs for responsive images
+	 *
+	 * @param array $sources Array of image sources.
+	 * @param array $size_array Array of width and height values.
+	 * @param string $image_src The 'src' of the image.
+	 * @param array $image_meta The image meta data as returned by 'wp_get_attachment_metadata()'.
+	 * @param int $attachment_id Image attachment ID.
+	 * @return array Modified sources array.
+	 */
+	public function rewrite_srcset($sources, $size_array, $image_src, $image_meta, $attachment_id) {
+		if (empty($sources)) {
+			return $sources;
+		}
+
+		$s3_info = get_post_meta($attachment_id, 'wps3_s3_info', true);
+		if (!empty($s3_info) && isset($s3_info['key'])) {
+			$cdn_domain = get_option('wps3_cdn_domain');
+			$base_url = '';
+			
+			if (!empty($cdn_domain)) {
+				$base_url = rtrim($cdn_domain, '/');
+			} elseif (isset($s3_info['url'])) {
+				$base_url = dirname($s3_info['url']);
+			} else {
+				$base_url = dirname($this->get_s3_url($s3_info['key']));
+			}
+
+			foreach ($sources as &$source) {
+				if (isset($source['url'])) {
+					$filename = basename($source['url']);
+					$source['url'] = $base_url . '/' . $filename;
+				}
+			}
+		}
+
+		return $sources;
+	}
+
+	/**
+	 * Rewrite image attributes in the media library
+	 *
+	 * @param array $attr Array of attribute values.
+	 * @param WP_Post $attachment Image attachment post.
+	 * @param string|array $size Requested size.
+	 * @return array Modified attributes array.
+	 */
+	public function rewrite_image_attributes($attr, $attachment, $size) {
+		if (isset($attr['src'])) {
+			$s3_info = get_post_meta($attachment->ID, 'wps3_s3_info', true);
+			if (!empty($s3_info) && isset($s3_info['key'])) {
+				$cdn_domain = get_option('wps3_cdn_domain');
+				if (!empty($cdn_domain)) {
+					$cdn_base = rtrim($cdn_domain, '/');
+					$s3_key = ltrim($s3_info['key'], '/');
+					$attr['src'] = $cdn_base . '/' . $s3_key;
+				} elseif (isset($s3_info['url'])) {
+					$attr['src'] = $s3_info['url'];
+				} else {
+					$attr['src'] = $this->get_s3_url($s3_info['key']);
+				}
+			}
+		}
+
+		return $attr;
 	}
 }
 
@@ -1960,3 +2294,4 @@ add_action('plugins_loaded', 'register_wps3');
 register_activation_hook(WPS3_PLUGIN_FILE, ['WPS3', 'activate']);
 register_deactivation_hook(WPS3_PLUGIN_FILE, ['WPS3', 'deactivate']);
 register_uninstall_hook(WPS3_PLUGIN_FILE, ['WPS3', 'uninstall']);
+?>
