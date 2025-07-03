@@ -506,3 +506,4 @@ function filterByType($files, $type) { }
 <input type=\"checkbox\" name=\"use_acceleration\"> 
 function formatFileSize($bytes) { } 
 <div class=\"file-count\">Total Files: <span id=\"total-files\">0</span></div> 
+<div class=\"migration-summary\"></div> 
