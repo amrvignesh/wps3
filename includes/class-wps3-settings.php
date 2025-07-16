@@ -46,33 +46,9 @@ class WPS3_Settings {
         );
 
         add_settings_field(
-            'wps3_s3_endpoint_url',
-            __('S3 Endpoint URL', 'wps3'),
-            [$this, 'settings_field_s3_endpoint_url_callback'],
-            'wps3',
-            'wps3_section'
-        );
-
-        add_settings_field(
-            'wps3_bucket_name',
-            __('Bucket Name', 'wps3'),
-            [$this, 'settings_field_bucket_name_callback'],
-            'wps3',
-            'wps3_section'
-        );
-
-        add_settings_field(
-            'wps3_bucket_folder',
-            __('Bucket Folder (Optional)', 'wps3'),
-            [$this, 'settings_field_bucket_folder_callback'],
-            'wps3',
-            'wps3_section'
-        );
-
-        add_settings_field(
-            'wps3_s3_region',
-            __('S3 Region', 'wps3'),
-            [$this, 'settings_field_s3_region_callback'],
+            'wps3_s3_path',
+            __('S3 Path', 'wps3'),
+            [$this, 'settings_field_s3_path_callback'],
             'wps3',
             'wps3_section'
         );
@@ -110,12 +86,10 @@ class WPS3_Settings {
         );
 
         register_setting('wps3', 'wps3_enabled');
-        register_setting('wps3', 'wps3_s3_endpoint_url', [$this, 'validate_s3_endpoint_url']);
-        register_setting('wps3', 'wps3_bucket_name', [$this, 'validate_bucket_name']);
-        register_setting('wps3', 'wps3_bucket_folder', [$this, 'validate_bucket_folder']);
-        register_setting('wps3', 'wps3_s3_region', [$this, 'validate_s3_region']);
+        register_setting('wps3', 'wps3_s3_path', [$this, 'validate_s3_path']);
         register_setting('wps3', 'wps3_access_key');
         register_setting('wps3', 'wps3_secret_key');
+        $this->maybe_migrate_old_settings();
         register_setting('wps3', 'wps3_cdn_domain', [$this, 'validate_cdn_domain']);
         register_setting('wps3', 'wps3_delete_local');
     }
@@ -157,49 +131,19 @@ class WPS3_Settings {
     }
 
     /**
-     * Settings field S3 endpoint URL callback.
+     * Settings field S3 path callback.
      */
-    public function settings_field_s3_endpoint_url_callback() {
+    public function settings_field_s3_path_callback() {
         ?>
-        <input type="text" name="wps3_s3_endpoint_url" value="<?php echo esc_attr(get_option('wps3_s3_endpoint_url')); ?>" class="regular-text" placeholder="e.g., https://s3.example.com" />
+        <input type="text" name="wps3_s3_path" value="<?php echo esc_attr(get_option('wps3_s3_path')); ?>" class="regular-text" placeholder="s3://your-bucket/optional-folder?region=your-region&amp;endpoint=your-endpoint" />
         <p class="description">
-            <?php _e('Enter the S3 endpoint URL. For AWS S3, this might be like <code>https://s3.your-region.amazonaws.com</code>. For other services, refer to their documentation (e.g., <code>https://us-central-1.telnyxstorage.com</code>).', 'wps3'); ?>
-        </p>
-        <?php
-    }
-
-    /**
-     * Settings field bucket name callback.
-     */
-    public function settings_field_bucket_name_callback() {
-        ?>
-        <input type="text" name="wps3_bucket_name" value="<?php echo esc_attr(get_option('wps3_bucket_name')); ?>" class="regular-text" placeholder="e.g., my-wordpress-bucket" />
-        <p class="description">
-            <?php _e('Enter your S3 bucket name.', 'wps3'); ?>
-        </p>
-        <?php
-    }
-
-    /**
-     * Settings field bucket folder callback.
-     */
-    public function settings_field_bucket_folder_callback() {
-        ?>
-        <input type="text" name="wps3_bucket_folder" value="<?php echo esc_attr(get_option('wps3_bucket_folder')); ?>" class="regular-text" placeholder="e.g., wp-content/uploads" />
-        <p class="description">
-            <?php _e('Optional. Enter a folder path within your bucket to store uploads. Leave blank to use the bucket root.', 'wps3'); ?>
-        </p>
-        <?php
-    }
-
-    /**
-     * Settings field S3 region callback.
-     */
-    public function settings_field_s3_region_callback() {
-        ?>
-        <input type="text" name="wps3_s3_region" value="<?php echo esc_attr(get_option('wps3_s3_region')); ?>" class="regular-text" placeholder="e.g., us-west-2" />
-        <p class="description">
-            <?php _e('Enter the S3 region for your bucket (e.g., <code>us-west-2</code>, <code>eu-central-1</code>). This is required by some S3-compatible providers.', 'wps3'); ?>
+            <?php
+            _e('Enter the S3 path in the format: <code>s3://bucket-name/folder-path?region=region-name&amp;endpoint=custom-endpoint</code>', 'wps3');
+            echo '<br>';
+            _e('For AWS S3: <code>s3://my-bucket/wp-uploads?region=us-west-2</code>', 'wps3');
+            echo '<br>';
+            _e('For custom S3 providers: <code>s3://my-bucket/wp-uploads?region=us-east-1&amp;endpoint=https://s3.example.com</code>', 'wps3');
+            ?>
         </p>
         <?php
     }
@@ -241,68 +185,72 @@ class WPS3_Settings {
     }
 
     /**
-     * Validate S3 endpoint URL.
+     * Validate S3 path.
      *
      * @param string $value
      * @return string
      */
-    public function validate_s3_endpoint_url($value) {
+    public function validate_s3_path($value) {
         if (empty($value)) {
-            add_settings_error('wps3_s3_endpoint_url', 'empty', __('Please enter the S3 Endpoint URL.', 'wps3'));
+            add_settings_error('wps3_s3_path', 'empty', __('Please enter the S3 Path.', 'wps3'));
             return '';
         }
-        if (!filter_var($value, FILTER_VALIDATE_URL)) {
-            add_settings_error('wps3_s3_endpoint_url', 'invalid', __('The S3 Endpoint URL is not a valid URL.', 'wps3'));
-            return esc_url_raw($value);
+
+        $parsed_url = parse_url($value);
+
+        if (!isset($parsed_url['scheme']) || $parsed_url['scheme'] !== 's3') {
+            add_settings_error('wps3_s3_path', 'invalid_scheme', __('The S3 Path must start with <code>s3://</code>.', 'wps3'));
         }
-        return esc_url_raw(rtrim($value, '/'));
+
+        if (!isset($parsed_url['host'])) {
+            add_settings_error('wps3_s3_path', 'invalid_bucket', __('The S3 Path must include a bucket name.', 'wps3'));
+        }
+
+        if (isset($parsed_url['query'])) {
+            parse_str($parsed_url['query'], $query_params);
+            if (empty($query_params['region'])) {
+                add_settings_error('wps3_s3_path', 'invalid_region', __('The S3 Path must include a <code>region</code> query parameter.', 'wps3'));
+            }
+            if (empty($query_params['endpoint'])) {
+                add_settings_error('wps3_s3_path', 'invalid_endpoint', __('The S3 Path must include an <code>endpoint</code> query parameter.', 'wps3'));
+            }
+        } else {
+            add_settings_error('wps3_s3_path', 'missing_query', __('The S3 Path must include <code>region</code> and <code>endpoint</code> query parameters.', 'wps3'));
+        }
+
+        return esc_url_raw($value);
     }
 
     /**
-     * Validate bucket name.
-     *
-     * @param string $value
-     * @return string
+     * Maybe migrate old settings to the new S3 path format.
      */
-    public function validate_bucket_name($value) {
-        if (empty($value)) {
-            add_settings_error('wps3_bucket_name', 'empty', __('Please enter the Bucket Name.', 'wps3'));
-            return '';
+    public function maybe_migrate_old_settings() {
+        $s3_path = get_option('wps3_s3_path');
+        if ($s3_path) {
+            return;
         }
-        if (!preg_match('/^(?=.{3,63}$)[a-z0-9][a-z0-9.-]*[a-z0-9]$/', $value)) {
-            add_settings_error('wps3_bucket_name', 'invalid', __('The Bucket Name is not valid. It should be 3-63 characters, lowercase letters, numbers, dots, and hyphens.', 'wps3'));
-        }
-        return sanitize_text_field($value);
-    }
 
-    /**
-     * Validate bucket folder.
-     *
-     * @param string $value
-     * @return string
-     */
-    public function validate_bucket_folder($value) {
-        if (!empty($value)) {
-            return trim(sanitize_text_field($value), '/');
-        }
-        return '';
-    }
+        $endpoint = get_option('wps3_s3_endpoint_url');
+        $bucket = get_option('wps3_bucket_name');
+        $folder = get_option('wps3_bucket_folder');
+        $region = get_option('wps3_s3_region');
 
-    /**
-     * Validate S3 region.
-     *
-     * @param string $value
-     * @return string
-     */
-    public function validate_s3_region($value) {
-        if (empty($value)) {
-            add_settings_error('wps3_s3_region', 'empty', __('Please enter the S3 Region.', 'wps3'));
-            return '';
+        if ($endpoint && $bucket && $region) {
+            $path = sprintf('s3://%s', $bucket);
+            if ($folder) {
+                $path .= '/' . $folder;
+            }
+            $path .= '?' . http_build_query([
+                'region' => $region,
+                'endpoint' => $endpoint,
+            ]);
+            update_option('wps3_s3_path', $path);
+
+            delete_option('wps3_s3_endpoint_url');
+            delete_option('wps3_bucket_name');
+            delete_option('wps3_bucket_folder');
+            delete_option('wps3_s3_region');
         }
-        if (!preg_match('/^[a-z0-9-]+$/', $value)) {
-            add_settings_error('wps3_s3_region', 'invalid', __('The S3 Region is not valid (e.g., us-west-2).', 'wps3'));
-        }
-        return sanitize_text_field($value);
     }
 
     /**
