@@ -32,19 +32,18 @@ class WPS3_S3_Client {
      * WPS3_S3_Client constructor.
      */
     public function __construct() {
+        $endpoint_url = get_option('wps3_s3_endpoint_url');
         $this->bucket_name = get_option('wps3_bucket_name');
         $this->bucket_folder = get_option('wps3_bucket_folder', '');
-
-        $endpoint = get_option('wps3_s3_endpoint_url');
         $region = get_option('wps3_s3_region');
         $access_key = get_option('wps3_access_key');
         $secret_key = get_option('wps3_secret_key');
 
-        if (!empty($endpoint) && !empty($this->bucket_name) && !empty($region) && !empty($access_key) && !empty($secret_key)) {
+        if (!empty($endpoint_url) && !empty($this->bucket_name) && !empty($region) && !empty($access_key) && !empty($secret_key)) {
             $config = [
                 'version'     => 'latest',
                 'region'      => $region,
-                'endpoint'    => $endpoint,
+                'endpoint'    => $endpoint_url,
                 'credentials' => [
                     'key'    => $access_key,
                     'secret' => $secret_key,
@@ -116,24 +115,24 @@ class WPS3_S3_Client {
             return false;
         }
 
-        try {
-            $file_basename = basename($file_path);
-            $key_parts = [];
-            if (!empty($this->bucket_folder)) {
-                $key_parts[] = trim($this->bucket_folder, '/');
-            }
-            $key_parts[] = $file_basename;
-            $key = implode('/', $key_parts);
+        $wp_upload_dir = wp_upload_dir();
+        $s3_key = str_replace($wp_upload_dir['basedir'], '', $file_path);
+        $s3_key = ltrim($s3_key, '/');
 
+        if (!empty($this->bucket_folder)) {
+            $s3_key = trailingslashit($this->bucket_folder) . $s3_key;
+        }
+
+        try {
             $this->s3_client->putObject([
                 'Bucket'      => $this->bucket_name,
-                'Key'         => $key,
+                'Key'         => $s3_key,
                 'Body'        => fopen($file_path, 'r'),
                 'ACL'         => 'public-read',
                 'ContentType' => $this->get_mime_type($file_path),
             ]);
 
-            return $key;
+            return $s3_key;
         } catch (\Exception $e) {
             error_log('S3 upload error for file ' . $file_path . ': ' . $e->getMessage());
             return false;

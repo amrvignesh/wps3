@@ -104,14 +104,7 @@ class WPS3
         $s3_key = $this->s3_client_wrapper->upload_file($file_data['file']);
 
         if ($s3_key) {
-            $s3_url = $this->s3_client_wrapper->get_s3_url($s3_key);
-            $file_data['url'] = $s3_url;
-            $file_data['s3_info'] = [
-                'bucket' => $this->s3_client_wrapper->get_bucket_name(),
-                'key'    => $s3_key,
-                'url'    => $s3_url,
-            ];
-
+            set_transient('wps3_last_s3_key', $s3_key, 3600); // Store for 1 hour
             if (get_option('wps3_delete_local')) {
                 @unlink($file_data['file']);
             }
@@ -159,14 +152,10 @@ class WPS3
             return;
         }
 
-        $file_path = get_attached_file($attachment_id);
-        if (empty($file_path) || !file_exists($file_path)) {
-            return;
-        }
-
-        $s3_key = $this->s3_client_wrapper->upload_file($file_path);
+        $s3_key = get_transient('wps3_last_s3_key');
 
         if ($s3_key) {
+            delete_transient('wps3_last_s3_key');
             $s3_url = $this->s3_client_wrapper->get_s3_url($s3_key);
             update_post_meta($attachment_id, 'wps3_s3_info', [
                 'bucket' => $this->s3_client_wrapper->get_bucket_name(),
@@ -174,6 +163,7 @@ class WPS3
                 'url'    => $s3_url,
             ]);
 
+            $file_path = get_attached_file($attachment_id);
             $metadata = wp_get_attachment_metadata($attachment_id);
             if (!empty($metadata['sizes'])) {
                 $base_dir = trailingslashit(dirname($file_path));
@@ -212,12 +202,6 @@ class WPS3
 
         $cdn_domain = get_option('wps3_cdn_domain');
         $s3_key = $s3_info['key'];
-        $filename = basename(get_attached_file($attachment_id));
-        $s3_filename = basename($s3_key);
-
-        if ($filename !== $s3_filename) {
-            $s3_key = str_replace($s3_filename, $filename, $s3_key);
-        }
 
         if (!empty($cdn_domain)) {
             return 'https://' . rtrim($cdn_domain, '/') . '/' . ltrim($s3_key, '/');
@@ -252,7 +236,13 @@ class WPS3
 
         if (is_string($size) && isset($meta['sizes'][$size])) {
             $s3_key = dirname($s3_info['key']) . '/' . $meta['sizes'][$size]['file'];
-            $url = $this->rewrite_attachment_url($this->s3_client_wrapper->get_s3_url($s3_key), $attachment_id);
+            $cdn_domain = get_option('wps3_cdn_domain');
+
+            if (!empty($cdn_domain)) {
+                $url = 'https://' . rtrim($cdn_domain, '/') . '/' . ltrim($s3_key, '/');
+            } else {
+                $url = $this->s3_client_wrapper->get_s3_url($s3_key);
+            }
             return [$url, $meta['sizes'][$size]['width'], $meta['sizes'][$size]['height'], true];
         }
 
