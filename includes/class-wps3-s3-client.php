@@ -32,19 +32,18 @@ class WPS3_S3_Client {
      * WPS3_S3_Client constructor.
      */
     public function __construct() {
+        $endpoint_url = get_option('wps3_s3_endpoint_url');
         $this->bucket_name = get_option('wps3_bucket_name');
         $this->bucket_folder = get_option('wps3_bucket_folder', '');
-
-        $endpoint = get_option('wps3_s3_endpoint_url');
         $region = get_option('wps3_s3_region');
         $access_key = get_option('wps3_access_key');
         $secret_key = get_option('wps3_secret_key');
 
-        if (!empty($endpoint) && !empty($this->bucket_name) && !empty($region) && !empty($access_key) && !empty($secret_key)) {
+        if (!empty($endpoint_url) && !empty($this->bucket_name) && !empty($region) && !empty($access_key) && !empty($secret_key)) {
             $config = [
                 'version'     => 'latest',
                 'region'      => $region,
-                'endpoint'    => $endpoint,
+                'endpoint'    => $endpoint_url,
                 'credentials' => [
                     'key'    => $access_key,
                     'secret' => $secret_key,
