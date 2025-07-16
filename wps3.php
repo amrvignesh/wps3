@@ -173,6 +173,8 @@ class WPS3
                         $s3_key = $this->s3_client_wrapper->upload_file($size_file_path);
                         if ($s3_key) {
                             $size_data['s3_key'] = $s3_key;
+                        } else {
+                            error_log("WPS3 Warning: Failed to upload file to S3. File path: " . $size_file_path);
                         }
                     }
                 }
