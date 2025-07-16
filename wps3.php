@@ -36,6 +36,7 @@ require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-migration.php';
 class WPS3
 {
     private $s3_client_wrapper;
+    protected $uploaded_file_s3_info = [];
 
     /**
      * WPS3 constructor.
@@ -47,7 +48,7 @@ class WPS3
         new WPS3_Migration($this->s3_client_wrapper);
 
         add_action('wp_loaded', [$this, 'init']);
-        add_action('wp_insert_attachment', [$this, 'upload_attachment']);
+        add_action('add_attachment', [$this, 'upload_attachment']);
         add_action('delete_attachment', [$this, 'delete_attachment']);
         add_action('plugins_loaded', [$this, 'load_textdomain']);
 
@@ -60,6 +61,7 @@ class WPS3
         add_filter('wp_calculate_image_srcset', [$this, 'rewrite_srcset'], 99, 5);
         add_filter('wp_get_attachment_thumb_url', [$this, 'rewrite_attachment_url'], 99, 2);
         add_filter('wp_get_attachment_image_attributes', [$this, 'rewrite_image_attributes'], 99, 3);
+        add_filter('wp_prepare_attachment_for_js', [$this, 'prepare_attachment_for_js'], 99, 2);
     }
 
     /**
@@ -101,13 +103,42 @@ class WPS3
             return $file_data;
         }
 
-        $s3_key = $this->s3_client_wrapper->upload_file($file_data['file']);
+        $source_file_path = $file_data['file'];
+        $upload_dir_info = wp_upload_dir();
+        $relative_path = str_replace(trailingslashit($upload_dir_info['basedir']), '', $source_file_path);
+        $unique_filename = basename($source_file_path);
 
-        if ($s3_key) {
-            set_transient('wps3_last_s3_key', $s3_key, 3600); // Store for 1 hour
+        // Construct the S3 object key
+        $key_parts = [];
+        if (!empty($this->s3_client_wrapper->get_bucket_folder())) {
+            $key_parts[] = trim($this->s3_client_wrapper->get_bucket_folder(), '/');
+        }
+        $key_parts[] = ltrim($relative_path, '/');
+        $s3_object_key = implode('/', array_filter($key_parts));
+
+        // Upload the file to S3
+        $upload_success = $this->s3_client_wrapper->upload_file($source_file_path, $s3_object_key);
+        
+        if ($upload_success) {
+            $s3_url = $this->s3_client_wrapper->get_s3_url($s3_object_key);
+            
+            // Update the file info with S3 data
+            $file_data['url'] = $s3_url;
+            
+            // Store S3 info temporarily for upload_attachment to pick up
+            $this->uploaded_file_s3_info[$unique_filename] = [
+                'bucket' => $this->s3_client_wrapper->get_bucket_name(),
+                'key'    => $s3_object_key,
+                'url'    => $s3_url,
+            ];
+            
+            error_log("WPS3: Successfully uploaded main file to S3: $source_file_path -> $s3_object_key");
+            
             if (get_option('wps3_delete_local')) {
-                @unlink($file_data['file']);
+                @unlink($source_file_path);
             }
+        } else {
+            error_log("WPS3: S3 upload failed in upload_overrides for file: $source_file_path");
         }
 
         return $file_data;
@@ -148,38 +179,60 @@ class WPS3
      */
     public function upload_attachment($attachment_id)
     {
-        if (!get_option('wps3_enabled') || !$this->s3_client_wrapper->get_s3_client()) {
+        // This hook is now responsible for saving the S3 meta and uploading thumbnails.
+        // The main file has already been uploaded by upload_overrides().
+        
+        // If plugin is not enabled, do nothing
+        if (!get_option('wps3_enabled') || empty($this->s3_client_wrapper)) {
             return;
         }
+        
+        // Get the filename that WordPress has saved
+        $attached_file_path_relative = get_post_meta($attachment_id, '_wp_attached_file', true);
+        if (empty($attached_file_path_relative)) {
+            return;
+        }
+        $unique_filename = basename($attached_file_path_relative);
 
-        $s3_key = get_transient('wps3_last_s3_key');
-
-        if ($s3_key) {
-            delete_transient('wps3_last_s3_key');
-            $s3_url = $this->s3_client_wrapper->get_s3_url($s3_key);
-            update_post_meta($attachment_id, 'wps3_s3_info', [
-                'bucket' => $this->s3_client_wrapper->get_bucket_name(),
-                'key'    => $s3_key,
-                'url'    => $s3_url,
-            ]);
-
-            $file_path = get_attached_file($attachment_id);
+        // Check if we have temporary S3 info for this filename
+        if (isset($this->uploaded_file_s3_info[$unique_filename])) {
+            $s3_info = $this->uploaded_file_s3_info[$unique_filename];
+            
+            // Save the S3 info as permanent post meta. This is the official tracking record.
+            update_post_meta($attachment_id, 'wps3_s3_info', $s3_info);
+            
+            // Now, upload resized versions (thumbnails) if they exist
             $metadata = wp_get_attachment_metadata($attachment_id);
             if (!empty($metadata['sizes'])) {
-                $base_dir = trailingslashit(dirname($file_path));
-                foreach ($metadata['sizes'] as $size => &$size_data) {
-                    $size_file_path = $base_dir . $size_data['file'];
-                    if (file_exists($size_file_path)) {
-                        $s3_key = $this->s3_client_wrapper->upload_file($size_file_path);
-                        if ($s3_key) {
-                            $size_data['s3_key'] = $s3_key;
+                $upload_dir_info = wp_upload_dir();
+                $base_dir_for_thumbnails_local = trailingslashit(dirname(trailingslashit($upload_dir_info['basedir']) . $attached_file_path_relative));
+                
+                error_log("WPS3: Processing thumbnails for attachment ID: $attachment_id, base dir: $base_dir_for_thumbnails_local");
+                
+                foreach ($metadata['sizes'] as $size_name => $size_data) {
+                    $size_file_local_path = $base_dir_for_thumbnails_local . $size_data['file'];
+                    if (file_exists($size_file_local_path)) {
+                        // upload_file will use its default hierarchical key generation for thumbnails
+                        $thumb_upload_success = $this->s3_client_wrapper->upload_file($size_file_local_path);
+                        if (!$thumb_upload_success) {
+                            error_log("WPS3: Failed to upload thumbnail $size_name for attachment ID: $attachment_id, Path: $size_file_local_path");
                         } else {
-                            error_log("WPS3 Warning: Failed to upload file to S3. File path: " . $size_file_path);
+                            error_log("WPS3: Successfully uploaded thumbnail $size_name for attachment ID: $attachment_id");
                         }
+                    } else {
+                        error_log("WPS3: Thumbnail file not found for $size_name, attachment ID: $attachment_id, Path: $size_file_local_path");
                     }
                 }
-                wp_update_attachment_metadata($attachment_id, $metadata);
+            } else {
+                error_log("WPS3: No thumbnail metadata found for attachment ID: $attachment_id");
             }
+            
+            // Clean up the temporary storage
+            unset($this->uploaded_file_s3_info[$unique_filename]);
+            
+            error_log("WPS3: Successfully processed attachment ID: $attachment_id with S3 info: " . print_r($s3_info, true));
+        } else {
+            error_log("WPS3: No temporary S3 info found for attachment ID: $attachment_id, filename: $unique_filename");
         }
     }
 
@@ -271,11 +324,28 @@ class WPS3
      * @param bool        $icon          Whether the image should be treated as an icon.
      * @return array|false
      */
-    public function rewrite_image_src($image, $attachment_id, $size, $icon)
-    {
-        if ($image) {
-            $image[0] = $this->rewrite_attachment_url($image[0], $attachment_id);
+    public function rewrite_image_src($image, $attachment_id, $size, $icon) {
+        if (!$image) {
+            return $image;
         }
+
+        $s3_info = get_post_meta($attachment_id, 'wps3_s3_info', true);
+        if (!empty($s3_info) && isset($s3_info['key']) && $s3_info['bucket'] !== 'error') {
+            $cdn_domain = get_option('wps3_cdn_domain');
+            if (!empty($cdn_domain)) {
+                $cdn_base = rtrim($cdn_domain, '/');
+                if (strpos($cdn_base, 'http') !== 0) {
+                    $cdn_base = 'https://' . $cdn_base;
+                }
+                $s3_key = ltrim($s3_info['key'], '/');
+                $image[0] = $cdn_base . '/' . $s3_key;
+            } elseif (isset($s3_info['url'])) {
+                $image[0] = $s3_info['url'];
+            } else {
+                $image[0] = $this->s3_client_wrapper->get_s3_url($s3_info['key']);
+            }
+        }
+
         return $image;
     }
 
@@ -289,13 +359,35 @@ class WPS3
      * @param int    $attachment_id Image attachment ID.
      * @return array
      */
-    public function rewrite_srcset($sources, $size_array, $image_src, $image_meta, $attachment_id)
-    {
-        if (is_array($sources)) {
-            foreach ($sources as $width => &$source) {
-                $source['url'] = $this->rewrite_attachment_url($source['url'], $attachment_id);
+    public function rewrite_srcset($sources, $size_array, $image_src, $image_meta, $attachment_id) {
+        if (empty($sources)) {
+            return $sources;
+        }
+
+        $s3_info = get_post_meta($attachment_id, 'wps3_s3_info', true);
+        if (!empty($s3_info) && isset($s3_info['key']) && $s3_info['bucket'] !== 'error') {
+            $cdn_domain = get_option('wps3_cdn_domain');
+            $base_url = '';
+            
+            if (!empty($cdn_domain)) {
+                $base_url = rtrim($cdn_domain, '/');
+                if (strpos($base_url, 'http') !== 0) {
+                    $base_url = 'https://' . $base_url;
+                }
+            } elseif (isset($s3_info['url'])) {
+                $base_url = dirname($s3_info['url']);
+            } else {
+                $base_url = dirname($this->s3_client_wrapper->get_s3_url($s3_info['key']));
+            }
+
+            foreach ($sources as &$source) {
+                if (isset($source['url'])) {
+                    $filename = basename($source['url']);
+                    $source['url'] = $base_url . '/' . $filename;
+                }
             }
         }
+
         return $sources;
     }
 
@@ -316,6 +408,38 @@ class WPS3
             $attr['srcset'] = $this->rewrite_srcset($attr['srcset'], [], '', [], $attachment->ID);
         }
         return $attr;
+    }
+
+    /**
+     * Prepare attachment data for the media modal.
+     *
+     * @param array   $response   Array of attachment data.
+     * @param WP_Post $attachment Attachment object.
+     * @return array
+     */
+    public function prepare_attachment_for_js($response, $attachment) {
+        if (!get_option('wps3_enabled') || !$this->s3_client_wrapper->get_s3_client()) {
+            return $response;
+        }
+        
+        $s3_info = get_post_meta($attachment->ID, 'wps3_s3_info', true);
+        
+        if (!empty($s3_info) && isset($s3_info['key']) && $s3_info['bucket'] !== 'error') {
+            // Rewrite the main attachment URL
+            $response['url'] = $this->rewrite_attachment_url($response['url'], $attachment->ID);
+
+            // Rewrite URLs for all available sizes
+            if (isset($response['sizes']) && is_array($response['sizes'])) {
+                foreach ($response['sizes'] as $size_name => &$size_data) {
+                    $downsized = $this->rewrite_image_downsize(false, $attachment->ID, $size_name);
+                    if (is_array($downsized) && isset($downsized[0])) {
+                        $size_data['url'] = $downsized[0];
+                    }
+                }
+            }
+        }
+        
+        return $response;
     }
 
     /**

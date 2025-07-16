@@ -104,9 +104,10 @@ class WPS3_S3_Client {
      * Upload file.
      *
      * @param string $file_path
+     * @param string|null $custom_key Optional custom S3 key
      * @return bool|string
      */
-    public function upload_file($file_path) {
+    public function upload_file($file_path, $custom_key = null) {
         if (!$this->s3_client) {
             return false;
         }
@@ -115,12 +116,16 @@ class WPS3_S3_Client {
             return false;
         }
 
-        $wp_upload_dir = wp_upload_dir();
-        $s3_key = str_replace($wp_upload_dir['basedir'], '', $file_path);
-        $s3_key = ltrim($s3_key, '/');
+        if ($custom_key !== null) {
+            $s3_key = $custom_key;
+        } else {
+            $wp_upload_dir = wp_upload_dir();
+            $s3_key = str_replace($wp_upload_dir['basedir'], '', $file_path);
+            $s3_key = ltrim($s3_key, '/');
 
-        if (!empty($this->bucket_folder)) {
-            $s3_key = trailingslashit($this->bucket_folder) . $s3_key;
+            if (!empty($this->bucket_folder)) {
+                $s3_key = trailingslashit($this->bucket_folder) . $s3_key;
+            }
         }
 
         try {
