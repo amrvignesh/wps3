@@ -202,12 +202,6 @@ class WPS3
 
         $cdn_domain = get_option('wps3_cdn_domain');
         $s3_key = $s3_info['key'];
-        $filename = basename(get_attached_file($attachment_id));
-        $s3_filename = basename($s3_key);
-
-        if ($filename !== $s3_filename) {
-            $s3_key = str_replace($s3_filename, $filename, $s3_key);
-        }
 
         if (!empty($cdn_domain)) {
             return 'https://' . rtrim($cdn_domain, '/') . '/' . ltrim($s3_key, '/');
