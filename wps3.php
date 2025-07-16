@@ -321,10 +321,7 @@ class WPS3
     public static function activate()
     {
         add_option('wps3_enabled', false);
-        add_option('wps3_s3_endpoint_url', '');
-        add_option('wps3_bucket_name', '');
-        add_option('wps3_bucket_folder', '');
-        add_option('wps3_s3_region', '');
+        add_option('wps3_s3_path', '');
         add_option('wps3_access_key', '');
         add_option('wps3_secret_key', '');
         add_option('wps3_cdn_domain', '');
@@ -348,10 +345,7 @@ class WPS3
     public static function uninstall()
     {
         delete_option('wps3_enabled');
-        delete_option('wps3_s3_endpoint_url');
-        delete_option('wps3_bucket_name');
-        delete_option('wps3_bucket_folder');
-        delete_option('wps3_s3_region');
+        delete_option('wps3_s3_path');
         delete_option('wps3_access_key');
         delete_option('wps3_secret_key');
         delete_option('wps3_cdn_domain');
