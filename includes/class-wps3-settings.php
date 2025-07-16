@@ -109,15 +109,15 @@ class WPS3_Settings {
             'wps3_section'
         );
 
-        register_setting('wps3', 'wps3_enabled');
-        register_setting('wps3', 'wps3_bucket_name');
-        register_setting('wps3', 'wps3_bucket_folder');
-        register_setting('wps3', 'wps3_s3_endpoint_url');
-        register_setting('wps3', 'wps3_s3_region');
-        register_setting('wps3', 'wps3_access_key');
-        register_setting('wps3', 'wps3_secret_key');
-        register_setting('wps3', 'wps3_cdn_domain', [$this, 'validate_cdn_domain']);
-        register_setting('wps3', 'wps3_delete_local');
+        register_setting('wps3', 'wps3_enabled', ['sanitize_callback' => 'absint']);
+        register_setting('wps3', 'wps3_bucket_name', ['sanitize_callback' => 'sanitize_text_field']);
+        register_setting('wps3', 'wps3_bucket_folder', ['sanitize_callback' => 'sanitize_text_field']);
+        register_setting('wps3', 'wps3_s3_endpoint_url', ['sanitize_callback' => 'esc_url_raw']);
+        register_setting('wps3', 'wps3_s3_region', ['sanitize_callback' => 'sanitize_text_field']);
+        register_setting('wps3', 'wps3_access_key', ['sanitize_callback' => 'sanitize_text_field']);
+        register_setting('wps3', 'wps3_secret_key', ['sanitize_callback' => 'sanitize_text_field']);
+        register_setting('wps3', 'wps3_cdn_domain', ['sanitize_callback' => [$this, 'validate_cdn_domain']]);
+        register_setting('wps3', 'wps3_delete_local', ['sanitize_callback' => 'absint']);
     }
 
     /**
@@ -262,7 +262,7 @@ class WPS3_Settings {
     public function render_settings_page() {
         ?>
         <div class="wrap">
-            <h1><?php _e('S3 Uploads Offloader Settings', 'wps3'); ?></h1>
+            <h1><?php echo esc_html(__('S3 Uploads Offloader Settings', 'wps3')); ?></h1>
             <form method="post" action="options.php">
                 <?php
                 settings_fields('wps3');
@@ -273,4 +273,15 @@ class WPS3_Settings {
         </div>
         <?php
     }
+
+    // Template for secure custom admin actions (for future use):
+    /*
+    public function handle_custom_action() {
+        if (!current_user_can('manage_options')) {
+            wp_die(__('You do not have permission to perform this action.', 'wps3'));
+        }
+        check_admin_referer('wps3_custom_action'); // Nonce check
+        // ... handle action ...
+    }
+    */
 }
