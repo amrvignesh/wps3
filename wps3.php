@@ -167,12 +167,18 @@ class WPS3
             $metadata = wp_get_attachment_metadata($attachment_id);
             if (!empty($metadata['sizes'])) {
                 $base_dir = trailingslashit(dirname($file_path));
-                foreach ($metadata['sizes'] as $size_data) {
+                foreach ($metadata['sizes'] as $size => &$size_data) {
                     $size_file_path = $base_dir . $size_data['file'];
                     if (file_exists($size_file_path)) {
-                        $this->s3_client_wrapper->upload_file($size_file_path);
+                        $s3_key = $this->s3_client_wrapper->upload_file($size_file_path);
+                        if ($s3_key) {
+                            $size_data['s3_key'] = $s3_key;
+                        } else {
+                            error_log("WPS3 Warning: Failed to upload file to S3. File path: " . $size_file_path);
+                        }
                     }
                 }
+                wp_update_attachment_metadata($attachment_id, $metadata);
             }
         }
     }
@@ -235,7 +241,14 @@ class WPS3
         }
 
         if (is_string($size) && isset($meta['sizes'][$size])) {
-            $s3_key = dirname($s3_info['key']) . '/' . $meta['sizes'][$size]['file'];
+            $size_info = $meta['sizes'][$size];
+            if (isset($size_info['s3_key'])) {
+                $s3_key = $size_info['s3_key'];
+            } else {
+                // Fallback for older uploads
+                $s3_key = dirname($s3_info['key']) . '/' . $size_info['file'];
+            }
+
             $cdn_domain = get_option('wps3_cdn_domain');
 
             if (!empty($cdn_domain)) {
@@ -243,7 +256,7 @@ class WPS3
             } else {
                 $url = $this->s3_client_wrapper->get_s3_url($s3_key);
             }
-            return [$url, $meta['sizes'][$size]['width'], $meta['sizes'][$size]['height'], true];
+            return [$url, $size_info['width'], $size_info['height'], true];
         }
 
         return $downsize;
