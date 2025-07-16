@@ -236,7 +236,13 @@ class WPS3
 
         if (is_string($size) && isset($meta['sizes'][$size])) {
             $s3_key = dirname($s3_info['key']) . '/' . $meta['sizes'][$size]['file'];
-            $url = $this->rewrite_attachment_url($this->s3_client_wrapper->get_s3_url($s3_key), $attachment_id);
+            $cdn_domain = get_option('wps3_cdn_domain');
+
+            if (!empty($cdn_domain)) {
+                $url = 'https://' . rtrim($cdn_domain, '/') . '/' . ltrim($s3_key, '/');
+            } else {
+                $url = $this->s3_client_wrapper->get_s3_url($s3_key);
+            }
             return [$url, $meta['sizes'][$size]['width'], $meta['sizes'][$size]['height'], true];
         }
 
