@@ -54,7 +54,7 @@ class WPS3_S3_Client {
             try {
                 $this->s3_client = new S3Client($config);
             } catch (\Exception $e) {
-                error_log('WPS3: Error initializing S3 client: ' . $e->getMessage());
+                self::wps3_log('Error initializing S3 client: ' . $e->getMessage(), 'error');
                 $this->s3_client = null;
             }
         }
@@ -139,7 +139,7 @@ class WPS3_S3_Client {
 
             return $s3_key;
         } catch (\Exception $e) {
-            error_log('S3 upload error for file ' . $file_path . ': ' . $e->getMessage());
+            self::wps3_log('S3 upload error for file ' . $file_path . ': ' . $e->getMessage(), 'error');
             return false;
         }
     }
@@ -162,7 +162,7 @@ class WPS3_S3_Client {
             ]);
             return true;
         } catch (\Exception $e) {
-            error_log('WPS3: Error deleting object ' . $key . ' from S3: ' . $e->getMessage());
+            self::wps3_log('Error deleting object ' . $key . ' from S3: ' . $e->getMessage(), 'error');
             return false;
         }
     }
@@ -176,5 +176,17 @@ class WPS3_S3_Client {
     private function get_mime_type($file_path) {
         $mime_type = wp_check_filetype($file_path);
         return $mime_type['type'] ?? 'application/octet-stream';
+    }
+
+    /**
+     * Log messages using WordPress's error logging system.
+     *
+     * @param string $message
+     * @param string $level (optional) Log level: 'error', 'warning', 'info', etc.
+     */
+    public static function wps3_log($message, $level = 'info') {
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("WPS3 [{$level}]: $message");
+        }
     }
 }

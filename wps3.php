@@ -132,13 +132,13 @@ class WPS3
                 'url'    => $s3_url,
             ];
             
-            error_log("WPS3: Successfully uploaded main file to S3: $source_file_path -> $s3_object_key");
+            $this->wps3_log("Successfully uploaded main file to S3: $source_file_path -> $s3_object_key", 'info');
             
             if (get_option('wps3_delete_local')) {
                 @unlink($source_file_path);
             }
         } else {
-            error_log("WPS3: S3 upload failed in upload_overrides for file: $source_file_path");
+            $this->wps3_log("S3 upload failed in upload_overrides for file: $source_file_path", 'error');
         }
 
         return $file_data;
@@ -207,7 +207,7 @@ class WPS3
                 $upload_dir_info = wp_upload_dir();
                 $base_dir_for_thumbnails_local = trailingslashit(dirname(trailingslashit($upload_dir_info['basedir']) . $attached_file_path_relative));
                 
-                error_log("WPS3: Processing thumbnails for attachment ID: $attachment_id, base dir: $base_dir_for_thumbnails_local");
+                $this->wps3_log("Processing thumbnails for attachment ID: $attachment_id, base dir: $base_dir_for_thumbnails_local", 'info');
                 
                 foreach ($metadata['sizes'] as $size_name => $size_data) {
                     $size_file_local_path = $base_dir_for_thumbnails_local . $size_data['file'];
@@ -215,24 +215,24 @@ class WPS3
                         // upload_file will use its default hierarchical key generation for thumbnails
                         $thumb_upload_success = $this->s3_client_wrapper->upload_file($size_file_local_path);
                         if (!$thumb_upload_success) {
-                            error_log("WPS3: Failed to upload thumbnail $size_name for attachment ID: $attachment_id, Path: $size_file_local_path");
+                            $this->wps3_log("Failed to upload thumbnail $size_name for attachment ID: $attachment_id, Path: $size_file_local_path", 'error');
                         } else {
-                            error_log("WPS3: Successfully uploaded thumbnail $size_name for attachment ID: $attachment_id");
+                            $this->wps3_log("Successfully uploaded thumbnail $size_name for attachment ID: $attachment_id", 'info');
                         }
                     } else {
-                        error_log("WPS3: Thumbnail file not found for $size_name, attachment ID: $attachment_id, Path: $size_file_local_path");
+                        $this->wps3_log("Thumbnail file not found for $size_name, attachment ID: $attachment_id, Path: $size_file_local_path", 'warning');
                     }
                 }
             } else {
-                error_log("WPS3: No thumbnail metadata found for attachment ID: $attachment_id");
+                $this->wps3_log("No thumbnail metadata found for attachment ID: $attachment_id", 'warning');
             }
             
             // Clean up the temporary storage
             unset($this->uploaded_file_s3_info[$unique_filename]);
             
-            error_log("WPS3: Successfully processed attachment ID: $attachment_id with S3 info: " . print_r($s3_info, true));
+            $this->wps3_log("Successfully processed attachment ID: $attachment_id with S3 info: " . print_r($s3_info, true), 'info');
         } else {
-            error_log("WPS3: No temporary S3 info found for attachment ID: $attachment_id, filename: $unique_filename");
+            $this->wps3_log("No temporary S3 info found for attachment ID: $attachment_id, filename: $unique_filename", 'warning');
         }
     }
 
@@ -448,6 +448,18 @@ class WPS3
             }
         }
         return $response;
+    }
+
+    /**
+     * Log messages using WordPress's error logging system.
+     *
+     * @param string $message
+     * @param string $level (optional) Log level: 'error', 'warning', 'info', etc.
+     */
+    protected function wps3_log($message, $level = 'info') {
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("WPS3 [{$level}]: $message");
+        }
     }
 
     /**
