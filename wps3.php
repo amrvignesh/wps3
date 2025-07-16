@@ -421,14 +421,22 @@ class WPS3
         if (!get_option('wps3_enabled') || !$this->s3_client_wrapper->get_s3_client()) {
             return $response;
         }
-        
         $s3_info = get_post_meta($attachment->ID, 'wps3_s3_info', true);
-        
         if (!empty($s3_info) && isset($s3_info['key']) && $s3_info['bucket'] !== 'error') {
             // Rewrite the main attachment URL
             $response['url'] = $this->rewrite_attachment_url($response['url'], $attachment->ID);
 
-            // Rewrite URLs for all available sizes
+            // Rewrite the icon URL if present (for non-image files)
+            if (isset($response['icon'])) {
+                $response['icon'] = $this->rewrite_attachment_url($response['icon'], $attachment->ID);
+            }
+
+            // Rewrite the image preview URL if present (for PDFs, etc.)
+            if (isset($response['image'])) {
+                $response['image'] = $this->rewrite_attachment_url($response['image'], $attachment->ID);
+            }
+
+            // Rewrite URLs for all available sizes (for images)
             if (isset($response['sizes']) && is_array($response['sizes'])) {
                 foreach ($response['sizes'] as $size_name => &$size_data) {
                     $downsized = $this->rewrite_image_downsize(false, $attachment->ID, $size_name);
@@ -436,9 +444,9 @@ class WPS3
                         $size_data['url'] = $downsized[0];
                     }
                 }
+                unset($size_data); // break reference
             }
         }
-        
         return $response;
     }
 
