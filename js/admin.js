@@ -54,14 +54,19 @@ jQuery(document).ready(function($) {
      * Start the migration process
      */
     function startMigration(reset = false) {
-        performAjaxRequest(
-            'wps3_start_migration',
-            { reset: reset },
-            function() {
+        $.ajax({
+            url: wps3_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'wps3_start_migration',
+                nonce: wps3_ajax.nonce,
+                reset: reset
+            },
+            beforeSend: function() {
                 $startButton.prop('disabled', true);
                 logMessage('Starting migration...');
             },
-            function(response) {
+            success: function(response) {
                 if (response.success) {
                     logMessage(response.data.message);
                     $startButton.hide();
@@ -81,7 +86,7 @@ jQuery(document).ready(function($) {
                 logMessage('AJAX Error: ' + error, 'error');
                 $startButton.prop('disabled', false);
             }
-        );
+        });
     }
     
     /**
@@ -289,6 +294,37 @@ jQuery(document).ready(function($) {
         });
     }
     
+    /**
+     * Reset the migration process
+     */
+    function resetMigration() {
+        $.ajax({
+            url: wps3_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'wps3_reset_migration',
+                nonce: wps3_ajax.nonce
+            },
+            beforeSend: function() {
+                logMessage('Resetting migration...');
+            },
+            success: function(response) {
+                if (response.success) {
+                    logMessage(response.data.message, 'info');
+                    updateProgress(0, 0, 0);
+                    $pauseButton.hide();
+                    $startButton.show().prop('disabled', false);
+                    stopStatusCheck();
+                } else {
+                    logMessage('Error: ' + response.data.message, 'error');
+                }
+            },
+            error: function(xhr, status, error) {
+                logMessage('AJAX Error: ' + error, 'error');
+            }
+        });
+    }
+    
     // Event Handlers
     $startButton.on('click', function() {
         startMigration();
@@ -299,7 +335,9 @@ jQuery(document).ready(function($) {
     });
     
     $resetButton.on('click', function() {
-        resetMigration();
+        if (confirm('Are you sure you want to reset the migration? This will clear all progress and start over.')) {
+            resetMigration();
+        }
     });
     
     // Check initial status on page load

@@ -26,6 +26,7 @@ class WPS3_Migration {
         add_action('wp_ajax_wps3_process_batch', [$this, 'ajax_process_batch']);
         add_action('wp_ajax_wps3_get_migration_status', [$this, 'ajax_get_migration_status']);
 		add_action('wp_ajax_wps3_pause_migration', [$this, 'ajax_pause_migration']);
+        add_action('wp_ajax_wps3_reset_migration', [$this, 'ajax_reset_migration']);
     }
 
     /**
@@ -170,18 +171,20 @@ class WPS3_Migration {
 
         $file_list = get_option('wps3_migration_file_list', []);
         if (empty($file_list)) {
-            $uploads_dir = wp_upload_dir();
-            $file_list = $this->get_all_files_recursive($uploads_dir['basedir']);
+            // Use the new method that only gets WordPress attachments
+            $file_list = $this->get_files_needing_migration();
             update_option('wps3_migration_file_list', $file_list);
+            $this->wps3_log("Found " . count($file_list) . " files needing migration", 'info');
         }
 
-        $batch_size = 10;
+        $batch_size = apply_filters('wps3_migration_batch_size', 5); // Reduced for better stability
         $migrated_files_count = get_option('wps3_migrated_files', 0);
         $files_to_process = array_slice($file_list, $migrated_files_count, $batch_size);
 
         $errors = get_transient('wps3_migration_errors') ?: [];
         $processed_count = 0;
         $skipped_count = 0;
+        $success_count = 0;
 
         foreach ($files_to_process as $file_path) {
             if ($this->is_file_migrated($file_path)) {
@@ -190,12 +193,30 @@ class WPS3_Migration {
                 continue;
             }
 
-            $key = $this->s3_client->upload_file($file_path);
-            if ($key) {
-                $this->update_attachment_s3_meta($file_path, $key);
-            } else {
-                $errors[] = ['path' => $file_path, 'error' => 'Upload failed'];
+            // Fire action before migration
+            do_action('wps3_before_upload', $file_path, '', ['migration' => true]);
+
+            try {
+                $key = $this->s3_client->upload_file($file_path);
+                if ($key) {
+                    $this->update_attachment_s3_meta($file_path, $key);
+                    
+                    // Also migrate thumbnails for this attachment
+                    $this->migrate_attachment_thumbnails($file_path);
+                    
+                    $success_count++;
+                    $this->wps3_log("Successfully migrated: " . basename($file_path), 'info');
+                } else {
+                    $error_msg = 'S3 upload failed';
+                    $errors[] = ['path' => $file_path, 'error' => $error_msg];
+                    $this->wps3_log("Failed to migrate: " . basename($file_path) . " - " . $error_msg, 'error');
+                }
+            } catch (Exception $e) {
+                $error_msg = 'Exception: ' . $e->getMessage();
+                $errors[] = ['path' => $file_path, 'error' => $error_msg];
+                $this->wps3_log("Exception migrating: " . basename($file_path) . " - " . $error_msg, 'error');
             }
+            
             $processed_count++;
         }
 
@@ -256,9 +277,35 @@ class WPS3_Migration {
         }
 
         update_option('wps3_migration_running', false);
+        $this->wps3_log('Migration paused by user', 'info');
 
         wp_send_json_success(['message' => 'Migration paused.']);
 	}
+
+    /**
+     * AJAX handler for resetting migration.
+     */
+    public function ajax_reset_migration() {
+        check_ajax_referer('wps3_ajax_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Permission denied.'], 403);
+        }
+
+        // Stop migration
+        update_option('wps3_migration_running', false);
+        
+        // Reset counters and file list
+        update_option('wps3_migrated_files', 0);
+        update_option('wps3_migration_file_list', []);
+        
+        // Clear errors
+        delete_transient('wps3_migration_errors');
+        
+        $this->wps3_log('Migration reset by user', 'info');
+
+        wp_send_json_success(['message' => 'Migration reset successfully.']);
+    }
 
     /**
      * Count files to migrate.
@@ -270,8 +317,9 @@ class WPS3_Migration {
         if (!empty($file_list)) {
             return count($file_list);
         }
-        $uploads_dir = wp_upload_dir();
-        return count($this->get_all_files_recursive($uploads_dir['basedir']));
+        
+        // Use the new method that only counts WordPress attachments
+        return count($this->get_files_needing_migration());
     }
 
     /**
@@ -282,13 +330,24 @@ class WPS3_Migration {
      */
     private function get_all_files_recursive($dir) {
         $files = [];
-        $dir_iterator = new RecursiveDirectoryIterator($dir);
-        $iterator = new RecursiveIteratorIterator($dir_iterator, RecursiveIteratorIterator::SELF_FIRST);
+        $allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'pdf', 'doc', 'docx', 'mp4', 'mp3', 'zip'];
+        
+        try {
+            $dir_iterator = new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS);
+            $iterator = new RecursiveIteratorIterator($dir_iterator, RecursiveIteratorIterator::SELF_FIRST);
 
-        foreach ($iterator as $file) {
-            if ($file->isFile()) {
-                $files[] = $file->getPathname();
+            foreach ($iterator as $file) {
+                if ($file->isFile()) {
+                    $extension = strtolower(pathinfo($file->getFilename(), PATHINFO_EXTENSION));
+                    
+                    // Only include files with allowed extensions
+                    if (in_array($extension, $allowed_extensions)) {
+                        $files[] = $file->getPathname();
+                    }
+                }
             }
+        } catch (Exception $e) {
+            $this->wps3_log("Error scanning directory {$dir}: " . $e->getMessage(), 'error');
         }
 
         return $files;
@@ -302,14 +361,43 @@ class WPS3_Migration {
      */
     private function update_attachment_s3_meta($file_path, $s3_key) {
         global $wpdb;
-        $attachment_id = $wpdb->get_var($wpdb->prepare("SELECT post_id FROM $wpdb->postmeta WHERE meta_value = %s", ltrim(str_replace(wp_upload_dir()['basedir'], '', $file_path), '/')));
+        
+        $upload_dir = wp_upload_dir();
+        $relative_path = str_replace(trailingslashit($upload_dir['basedir']), '', $file_path);
+        
+        // First try to find by _wp_attached_file meta
+        $attachment_id = $wpdb->get_var($wpdb->prepare(
+            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value = %s",
+            $relative_path
+        ));
+        
+        // If not found, try to find by filename in the relative path
+        if (!$attachment_id) {
+            $filename = basename($relative_path);
+            $attachment_id = $wpdb->get_var($wpdb->prepare(
+                "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value LIKE %s",
+                '%' . $wpdb->esc_like($filename)
+            ));
+        }
 
         if ($attachment_id) {
-            update_post_meta($attachment_id, 'wps3_s3_info', [
+            $s3_info = [
                 'bucket' => $this->s3_client->get_bucket_name(),
                 'key'    => $s3_key,
                 'url'    => $this->s3_client->get_s3_url($s3_key),
+            ];
+            
+            update_post_meta($attachment_id, 'wps3_s3_info', $s3_info);
+            
+            $this->wps3_log("Updated S3 metadata for attachment ID {$attachment_id}: {$relative_path}", 'info');
+            
+            // Fire action after migration
+            do_action('wps3_after_upload', $file_path, $s3_key, $s3_info['url'], [
+                'migration' => true,
+                'attachment_id' => $attachment_id
             ]);
+        } else {
+            $this->wps3_log("Could not find attachment ID for file: {$relative_path}", 'warning');
         }
     }
 
@@ -321,12 +409,142 @@ class WPS3_Migration {
      */
     private function is_file_migrated($file_path) {
         global $wpdb;
-        $attachment_id = $wpdb->get_var($wpdb->prepare("SELECT post_id FROM $wpdb->postmeta WHERE meta_value = %s", ltrim(str_replace(wp_upload_dir()['basedir'], '', $file_path), '/')));
+        
+        $upload_dir = wp_upload_dir();
+        $relative_path = str_replace(trailingslashit($upload_dir['basedir']), '', $file_path);
+        
+        // First try to find by _wp_attached_file meta
+        $attachment_id = $wpdb->get_var($wpdb->prepare(
+            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value = %s",
+            $relative_path
+        ));
+        
+        // If not found, try to find by filename
+        if (!$attachment_id) {
+            $filename = basename($relative_path);
+            $attachment_id = $wpdb->get_var($wpdb->prepare(
+                "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value LIKE %s",
+                '%' . $wpdb->esc_like($filename)
+            ));
+        }
 
         if ($attachment_id) {
-            return get_post_meta($attachment_id, 'wps3_s3_info', true);
+            $s3_info = get_post_meta($attachment_id, 'wps3_s3_info', true);
+            return !empty($s3_info) && isset($s3_info['key']) && $s3_info['bucket'] !== 'error';
         }
 
         return false;
+    }
+
+    /**
+     * Get files that need migration (only WordPress attachments).
+     *
+     * @return array
+     */
+    private function get_files_needing_migration() {
+        global $wpdb;
+        
+        // Get all attachments that don't have S3 info
+        $attachments = $wpdb->get_results("
+            SELECT p.ID, pm.meta_value as file_path
+            FROM {$wpdb->posts} p
+            LEFT JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = '_wp_attached_file'
+            LEFT JOIN {$wpdb->postmeta} pm2 ON p.ID = pm2.post_id AND pm2.meta_key = 'wps3_s3_info'
+            WHERE p.post_type = 'attachment'
+            AND pm.meta_value IS NOT NULL
+            AND pm2.meta_value IS NULL
+            ORDER BY p.ID DESC
+        ");
+        
+        $upload_dir = wp_upload_dir();
+        $files = [];
+        
+        foreach ($attachments as $attachment) {
+            $full_path = trailingslashit($upload_dir['basedir']) . $attachment->file_path;
+            if (file_exists($full_path)) {
+                $files[] = $full_path;
+            }
+        }
+        
+        return $files;
+    }
+
+    /**
+     * Migrate thumbnails for an attachment.
+     *
+     * @param string $file_path
+     */
+    private function migrate_attachment_thumbnails($file_path) {
+        global $wpdb;
+        
+        $upload_dir = wp_upload_dir();
+        $relative_path = str_replace(trailingslashit($upload_dir['basedir']), '', $file_path);
+        
+        // Get attachment ID
+        $attachment_id = $wpdb->get_var($wpdb->prepare(
+            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value = %s",
+            $relative_path
+        ));
+        
+        if (!$attachment_id) {
+            return;
+        }
+        
+        // Get attachment metadata
+        $metadata = wp_get_attachment_metadata($attachment_id);
+        if (empty($metadata['sizes'])) {
+            return;
+        }
+        
+        $base_dir = trailingslashit(dirname($file_path));
+        $uploaded_thumbnails = 0;
+        
+        foreach ($metadata['sizes'] as $size_name => $size_data) {
+            $thumb_path = $base_dir . $size_data['file'];
+            
+            if (file_exists($thumb_path)) {
+                try {
+                    // Fire action before thumbnail migration
+                    do_action('wps3_before_upload', $thumb_path, '', [
+                        'migration' => true,
+                        'thumbnail' => true,
+                        'size' => $size_name,
+                        'attachment_id' => $attachment_id
+                    ]);
+                    
+                    $thumb_key = $this->s3_client->upload_file($thumb_path);
+                    if ($thumb_key) {
+                        $uploaded_thumbnails++;
+                        $this->wps3_log("Migrated thumbnail {$size_name} for attachment {$attachment_id}", 'info');
+                        
+                        // Fire action after thumbnail migration
+                        do_action('wps3_after_upload', $thumb_path, $thumb_key, $this->s3_client->get_s3_url($thumb_key), [
+                            'migration' => true,
+                            'thumbnail' => true,
+                            'size' => $size_name,
+                            'attachment_id' => $attachment_id
+                        ]);
+                    }
+                } catch (Exception $e) {
+                    $this->wps3_log("Failed to migrate thumbnail {$size_name} for attachment {$attachment_id}: " . $e->getMessage(), 'error');
+                }
+            }
+        }
+        
+        if ($uploaded_thumbnails > 0) {
+            $this->wps3_log("Migrated {$uploaded_thumbnails} thumbnails for attachment {$attachment_id}", 'info');
+        }
+    }
+
+    /**
+     * Log messages using WordPress's error logging system.
+     *
+     * @param string $message
+     * @param string $level
+     */
+    private function wps3_log($message, $level = 'info') {
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("WPS3 Migration [{$level}]: $message");
+        }
     }
 }
