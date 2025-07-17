@@ -145,6 +145,26 @@ class WPS3_S3_Client {
     }
 
     /**
+     * Upload file with custom options.
+     *
+     * @param array $upload_options S3 putObject options
+     * @return bool|string
+     */
+    public function upload_file_with_options($upload_options) {
+        if (!$this->s3_client) {
+            return false;
+        }
+
+        try {
+            $this->s3_client->putObject($upload_options);
+            return isset($upload_options['Key']) ? $upload_options['Key'] : true;
+        } catch (\Exception $e) {
+            self::wps3_log('S3 upload error with custom options: ' . $e->getMessage(), 'error');
+            return false;
+        }
+    }
+
+    /**
      * Delete object.
      *
      * @param string $key
@@ -168,14 +188,24 @@ class WPS3_S3_Client {
     }
 
     /**
-     * Get mime type.
+     * Get mime type (public method).
      *
      * @param string $file_path
      * @return string
      */
-    private function get_mime_type($file_path) {
+    public function get_mime_type($file_path) {
         $mime_type = wp_check_filetype($file_path);
         return $mime_type['type'] ?? 'application/octet-stream';
+    }
+
+    /**
+     * Get mime type (private method for backward compatibility).
+     *
+     * @param string $file_path
+     * @return string
+     */
+    private function get_mime_type_private($file_path) {
+        return $this->get_mime_type($file_path);
     }
 
     /**

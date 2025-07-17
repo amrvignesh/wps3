@@ -116,8 +116,20 @@ class WPS3
         $key_parts[] = ltrim($relative_path, '/');
         $s3_object_key = implode('/', array_filter($key_parts));
 
+        // Fire action before upload
+        do_action('wps3_before_upload', $source_file_path, $s3_object_key, $file_data);
+
+        // Allow filtering of upload options
+        $upload_options = apply_filters('wps3_upload_options', [
+            'Bucket'      => $this->s3_client_wrapper->get_bucket_name(),
+            'Key'         => $s3_object_key,
+            'Body'        => fopen($source_file_path, 'r'),
+            'ACL'         => 'public-read',
+            'ContentType' => $this->s3_client_wrapper->get_mime_type($source_file_path),
+        ], $source_file_path, $s3_object_key, $file_data);
+
         // Upload the file to S3
-        $upload_success = $this->s3_client_wrapper->upload_file($source_file_path, $s3_object_key);
+        $upload_success = $this->s3_client_wrapper->upload_file_with_options($upload_options);
         
         if ($upload_success) {
             $s3_url = $this->s3_client_wrapper->get_s3_url($s3_object_key);
@@ -133,6 +145,9 @@ class WPS3
             ];
             
             $this->wps3_log("Successfully uploaded main file to S3: $source_file_path -> $s3_object_key", 'info');
+            
+            // Fire action after successful upload
+            do_action('wps3_after_upload', $source_file_path, $s3_object_key, $s3_url, $file_data);
             
             if (get_option('wps3_delete_local')) {
                 @unlink($source_file_path);
@@ -212,12 +227,29 @@ class WPS3
                 foreach ($metadata['sizes'] as $size_name => $size_data) {
                     $size_file_local_path = $base_dir_for_thumbnails_local . $size_data['file'];
                     if (file_exists($size_file_local_path)) {
+                        // Generate S3 key for thumbnail
+                        $wp_upload_dir = wp_upload_dir();
+                        $thumb_relative_path = str_replace(trailingslashit($wp_upload_dir['basedir']), '', $size_file_local_path);
+                        $thumb_key_parts = [];
+                        if (!empty($this->s3_client_wrapper->get_bucket_folder())) {
+                            $thumb_key_parts[] = trim($this->s3_client_wrapper->get_bucket_folder(), '/');
+                        }
+                        $thumb_key_parts[] = ltrim($thumb_relative_path, '/');
+                        $thumb_s3_key = implode('/', array_filter($thumb_key_parts));
+                        
+                        // Fire action before thumbnail upload
+                        do_action('wps3_before_upload', $size_file_local_path, $thumb_s3_key, ['size' => $size_name, 'attachment_id' => $attachment_id]);
+                        
                         // upload_file will use its default hierarchical key generation for thumbnails
                         $thumb_upload_success = $this->s3_client_wrapper->upload_file($size_file_local_path);
                         if (!$thumb_upload_success) {
                             $this->wps3_log("Failed to upload thumbnail $size_name for attachment ID: $attachment_id, Path: $size_file_local_path", 'error');
                         } else {
                             $this->wps3_log("Successfully uploaded thumbnail $size_name for attachment ID: $attachment_id", 'info');
+                            
+                            // Fire action after successful thumbnail upload
+                            $thumb_s3_url = $this->s3_client_wrapper->get_s3_url($thumb_upload_success);
+                            do_action('wps3_after_upload', $size_file_local_path, $thumb_upload_success, $thumb_s3_url, ['size' => $size_name, 'attachment_id' => $attachment_id]);
                         }
                     } else {
                         $this->wps3_log("Thumbnail file not found for $size_name, attachment ID: $attachment_id, Path: $size_file_local_path", 'warning');
@@ -263,10 +295,13 @@ class WPS3
         $s3_key = $s3_info['key'];
 
         if (!empty($cdn_domain)) {
-            return 'https://' . rtrim($cdn_domain, '/') . '/' . ltrim($s3_key, '/');
+            $s3_url = 'https://' . rtrim($cdn_domain, '/') . '/' . ltrim($s3_key, '/');
+        } else {
+            $s3_url = $this->s3_client_wrapper->get_s3_url($s3_key);
         }
 
-        return $this->s3_client_wrapper->get_s3_url($s3_key);
+        // Allow filtering of the final URL
+        return apply_filters('wps3_file_url', $s3_url, $attachment_id, $s3_info, $url);
     }
 
     /**
@@ -309,6 +344,10 @@ class WPS3
             } else {
                 $url = $this->s3_client_wrapper->get_s3_url($s3_key);
             }
+            
+            // Allow filtering of the final URL
+            $url = apply_filters('wps3_file_url', $url, $attachment_id, $s3_info, null);
+            
             return [$url, $size_info['width'], $size_info['height'], true];
         }
 
@@ -344,6 +383,9 @@ class WPS3
             } else {
                 $image[0] = $this->s3_client_wrapper->get_s3_url($s3_info['key']);
             }
+            
+            // Allow filtering of the final URL
+            $image[0] = apply_filters('wps3_file_url', $image[0], $attachment_id, $s3_info, $image[0]);
         }
 
         return $image;
