@@ -1,0 +1,37 @@
+{
+  "name": "wps3-plugin",
+  "version": "0.3.0",
+  "description": "WordPress S3 Migration Plugin",
+  "main": "js/admin.js",
+  "scripts": {
+    "build": "npm run build:js && npm run build:css",
+    "build:js": "terser js/admin.js --compress --mangle --output assets/js/admin.js --source-map url=admin.js.map",
+    "build:css": "sass css/admin.scss assets/css/admin.css --style compressed --source-map",
+    "watch": "npm run watch:js & npm run watch:css",
+    "watch:js": "terser js/admin.js --compress --mangle --output assets/js/admin.js --source-map url=admin.js.map --watch",
+    "watch:css": "sass css/admin.scss assets/css/admin.css --style compressed --source-map --watch",
+    "dev": "npm run build && npm run watch",
+    "clean": "rm -rf assets/js/* assets/css/*"
+  },
+  "devDependencies": {
+    "terser": "^5.25.0",
+    "sass": "^1.69.5"
+  },
+  "keywords": [
+    "wordpress",
+    "plugin",
+    "s3",
+    "migration",
+    "aws"
+  ],
+  "author": "Your Name",
+  "license": "GPL-2.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/wps3-plugin.git"
+  },
+  "engines": {
+    "node": ">=14.0.0",
+    "npm": ">=6.0.0"
+  }
+}

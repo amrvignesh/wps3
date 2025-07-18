@@ -1,0 +1,295 @@
+// WPS3 Plugin Admin Styles V2
+// Colors
+$primary-color: #2271b1;
+$secondary-color: #e0e0e0;
+$success-color: #00a32a;
+$error-color: #d63638;
+$warning-color: #dba617;
+$text-color: #1d2327;
+$white: #ffffff;
+$light-gray: #f6f7f7;
+$border-color: #c3c4c7;
+
+// Mixins
+@mixin transition($property: all, $duration: 0.3s, $easing: ease) {
+    transition: $property $duration $easing;
+}
+
+@mixin border-radius($radius: 4px) {
+    border-radius: $radius;
+}
+
+@mixin box-shadow($shadow: 0 1px 3px rgba(0,0,0,0.1)) {
+    box-shadow: $shadow;
+}
+
+@mixin flex-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+// Main migration status container
+.wps3-migration-status {
+    margin-top: 20px;
+    max-width: 1000px;
+    
+    .wps3-control-panel {
+        background: $white;
+        border: 1px solid $border-color;
+        @include border-radius(8px);
+        @include box-shadow(0 2px 8px rgba(0,0,0,0.1));
+        padding: 24px;
+        margin-bottom: 20px;
+    }
+}
+
+// Button section
+.wps3-buttons {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    
+    .button {
+        @include transition();
+        min-width: 120px;
+        height: 36px;
+        @include flex-center;
+        gap: 6px;
+        
+        .dashicons {
+            font-size: 16px;
+            width: 16px;
+            height: 16px;
+        }
+        
+        &:hover:not(:disabled) {
+            transform: translateY(-1px);
+            @include box-shadow(0 4px 12px rgba(0,0,0,0.15));
+        }
+        
+        &:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    }
+}
+
+// Progress section
+.wps3-progress-section {
+    margin-bottom: 24px;
+}
+
+// Progress bar styles
+.wps3-progress-bar-container {
+    width: 100%;
+    height: 24px;
+    background-color: $light-gray;
+    @include border-radius(12px);
+    margin-bottom: 20px;
+    overflow: hidden;
+    position: relative;
+    @include box-shadow(inset 0 1px 3px rgba(0,0,0,0.1));
+}
+
+.wps3-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, $primary-color, lighten($primary-color, 10%));
+    @include transition(width, 0.5s, ease-out);
+    position: relative;
+    min-width: 0;
+    
+    #wps3-progress-text {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: $white;
+        font-size: 12px;
+        font-weight: 600;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        white-space: nowrap;
+    }
+}
+
+// Statistics grid
+.wps3-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.wps3-stat-item {
+    background: $light-gray;
+    padding: 16px;
+    @include border-radius(8px);
+    text-align: center;
+    @include transition();
+    
+    &:hover {
+        background: darken($light-gray, 3%);
+    }
+    
+    .wps3-stat-label {
+        font-size: 12px;
+        color: lighten($text-color, 20%);
+        margin-bottom: 4px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .wps3-stat-value {
+        font-size: 18px;
+        font-weight: 600;
+        color: $text-color;
+        line-height: 1.2;
+    }
+}
+
+// Error section
+.wps3-error-section {
+    margin-top: 16px;
+}
+
+.wps3-error-message {
+    background: lighten($error-color, 45%);
+    color: $error-color;
+    padding: 12px 16px;
+    @include border-radius(6px);
+    border-left: 4px solid $error-color;
+    font-weight: 500;
+    display: none;
+    
+    &:empty {
+        display: none !important;
+    }
+}
+
+// Info section
+.wps3-info-section {
+    background: $light-gray;
+    padding: 20px;
+    @include border-radius(8px);
+    border-left: 4px solid $primary-color;
+    
+    h3 {
+        margin-top: 0;
+        margin-bottom: 12px;
+        color: $text-color;
+        font-size: 16px;
+    }
+    
+    ul {
+        margin: 0;
+        padding-left: 20px;
+        
+        li {
+            margin-bottom: 8px;
+            line-height: 1.5;
+            
+            strong {
+                color: $primary-color;
+            }
+        }
+    }
+}
+
+// Responsive design
+@media (max-width: 768px) {
+    .wps3-migration-status {
+        .wps3-control-panel {
+            padding: 16px;
+        }
+    }
+    
+    .wps3-buttons {
+        flex-direction: column;
+        
+        .button {
+            width: 100%;
+        }
+    }
+    
+    .wps3-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+    }
+    
+    .wps3-stat-item {
+        padding: 12px;
+        
+        .wps3-stat-value {
+            font-size: 16px;
+        }
+    }
+}
+
+// Animation for spinning icons
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.spin {
+    animation: spin 1s linear infinite;
+}
+
+// Status-specific styling
+.wps3-stat-item:has(#stat-status) {
+    .wps3-stat-value {
+        &:contains("Running") {
+            color: $success-color;
+        }
+        &:contains("Paused") {
+            color: $warning-color;
+        }
+        &:contains("Error") {
+            color: $error-color;
+        }
+        &:contains("Completed") {
+            color: $success-color;
+        }
+    }
+}
+
+// Legacy styles for backward compatibility
+.wps3-migration-container {
+    max-width: 800px;
+    margin: 20px 0;
+}
+
+.wps3-migration-progress {
+    margin: 20px 0;
+}
+
+.wps3-migration-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.wps3-stat-box {
+    background: $white;
+    border: 1px solid $border-color;
+    @include border-radius(6px);
+    padding: 15px;
+    text-align: center;
+    
+    .stat-label {
+        font-size: 12px;
+        color: lighten($text-color, 20%);
+        margin-bottom: 5px;
+        text-transform: uppercase;
+        font-weight: 500;
+    }
+    
+    .stat-value {
+        font-size: 20px;
+        font-weight: 600;
+        color: $text-color;
+    }
+} 

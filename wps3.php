@@ -3,7 +3,7 @@
 Plugin Name: WPS3
 Plugin URI: https://github.com/amrvignesh/wps3
 Description: Offload WordPress uploads directory to S3 compatible storage
-Version: 0.3
+Version: 0.4
 Requires at least: 5.0
 Requires PHP: 7.0
 Author: Vignesh AMR
@@ -20,7 +20,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('WPS3_VERSION', '0.3');
+define('WPS3_VERSION', '0.4');
 define('WPS3_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WPS3_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WPS3_PLUGIN_FILE', __FILE__);
@@ -32,11 +32,23 @@ require_once ABSPATH . 'wp-admin/includes/image.php';
 require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-s3-client.php';
 require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-settings.php';
 require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-migration.php';
+require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-migration-v2.php';
 
 class WPS3
 {
     private $s3_client_wrapper;
     protected $uploaded_file_s3_info = [];
+    private static $instance = null;
+
+    /**
+     * Get singleton instance
+     */
+    public static function get_instance() {
+        if (self::$instance === null) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
 
     /**
      * WPS3 constructor.
@@ -45,7 +57,8 @@ class WPS3
     {
         $this->s3_client_wrapper = new WPS3_S3_Client();
         new WPS3_Settings();
-        new WPS3_Migration($this->s3_client_wrapper);
+        // Use the new v2 migration with live control panel
+        new WPS3_Migration_V2($this->s3_client_wrapper);
 
         add_action('wp_loaded', [$this, 'init']);
         add_action('add_attachment', [$this, 'upload_attachment']);
@@ -545,12 +558,181 @@ class WPS3
     }
 }
 
+// Action Scheduler Integration for Background Jobs
+add_action('init', function() {
+    if (!function_exists('as_enqueue_async_action')) {
+        return;
+    }
+    
+    // Register the batch worker action
+    add_action('wps3_do_batch', 'wps3_batch_worker', 10, 1);
+});
+
+/**
+ * Background job worker for processing individual attachments
+ */
+function wps3_batch_worker($attachment_id) {
+    $state = get_option('wps3_migration_state', []);
+    if (empty($state) || 'running' !== $state['status']) {
+        return;
+    }
+
+    try {
+        // Get the WPS3 instance and upload the file
+        $wps3 = WPS3::get_instance();
+        $s3_client = $wps3->get_s3_client();
+        
+        if (!$s3_client) {
+            throw new Exception('S3 client not available');
+        }
+
+        $result = $wps3->upload_file($attachment_id);
+        
+        // Update state
+        $state['processing'] = max(0, $state['processing'] - 1);
+        $state['done'] += 1;
+        $state['queued'] = max(0, $state['queued'] - 1);
+        
+        if (is_wp_error($result)) {
+            $state['last_error'] = $result->get_error_message();
+        } else {
+            $state['last_error'] = '';
+        }
+        
+        update_option('wps3_migration_state', $state);
+        
+    } catch (Exception $e) {
+        $state['processing'] = max(0, $state['processing'] - 1);
+        $state['last_error'] = $e->getMessage();
+        update_option('wps3_migration_state', $state);
+    }
+}
+
+// REST API Endpoints for Migration Control
+add_action('rest_api_init', function() {
+    register_rest_route('wps3/v1', '/migrate', [
+        'methods' => 'POST',
+        'callback' => 'wps3_api_migrate',
+        'permission_callback' => function() {
+            return current_user_can('manage_options');
+        },
+    ]);
+    
+    register_rest_route('wps3/v1', '/status', [
+        'methods' => 'GET',
+        'callback' => 'wps3_api_status',
+        'permission_callback' => function() {
+            return current_user_can('manage_options');
+        },
+    ]);
+});
+
+/**
+ * REST API endpoint for migration control
+ */
+function wps3_api_migrate($request) {
+    $action = $request->get_param('do');
+    $state = get_option('wps3_migration_state', []);
+    
+    switch ($action) {
+        case 'start':
+            if (empty($state) || in_array($state['status'], ['finished', 'error', 'cancelled'])) {
+                global $wpdb;
+                
+                // Get all attachment IDs that need migration
+                $ids = $wpdb->get_col(
+                    "SELECT ID FROM {$wpdb->posts} 
+                     WHERE post_type = 'attachment' 
+                     AND post_mime_type LIKE 'image/%'
+                     ORDER BY ID ASC"
+                );
+                
+                $batch_size = 50;
+                $total_ids = count($ids);
+                
+                $state = [
+                    'status' => 'running',
+                    'total' => $total_ids,
+                    'done' => 0,
+                    'queued' => $total_ids,
+                    'processing' => 0,
+                    'started_at' => time(),
+                    'last_error' => '',
+                    'batch_size' => $batch_size,
+                ];
+                
+                update_option('wps3_migration_state', $state);
+                
+                // Queue all jobs
+                foreach ($ids as $id) {
+                    if (function_exists('as_enqueue_async_action')) {
+                        as_enqueue_async_action('wps3_do_batch', [$id], 'wps3');
+                        $state['processing']++;
+                    }
+                }
+                
+                update_option('wps3_migration_state', $state);
+            }
+            break;
+            
+        case 'pause':
+            if (!empty($state) && $state['status'] === 'running') {
+                $state['status'] = 'paused';
+                update_option('wps3_migration_state', $state);
+            }
+            break;
+            
+        case 'resume':
+            if (!empty($state) && $state['status'] === 'paused') {
+                $state['status'] = 'running';
+                update_option('wps3_migration_state', $state);
+            }
+            break;
+            
+        case 'cancel':
+            if (!empty($state) && in_array($state['status'], ['running', 'paused'])) {
+                $state['status'] = 'cancelled';
+                update_option('wps3_migration_state', $state);
+                
+                // Cancel all pending jobs
+                if (function_exists('as_unschedule_all_actions')) {
+                    as_unschedule_all_actions('wps3_do_batch', [], 'wps3');
+                }
+            }
+            break;
+    }
+    
+    return rest_ensure_response($state);
+}
+
+/**
+ * REST API endpoint for getting migration status
+ */
+function wps3_api_status($request) {
+    $state = get_option('wps3_migration_state', []);
+    return rest_ensure_response($state);
+}
+
+// Admin AJAX shim for backward compatibility
+add_action('wp_ajax_wps3_state', function() {
+    $state = get_option('wps3_migration_state', []);
+    wp_send_json_success($state);
+});
+
+add_action('wp_ajax_wps3_api', function() {
+    $action = sanitize_text_field($_POST['do'] ?? '');
+    $request = new WP_REST_Request('POST', '/wps3/v1/migrate');
+    $request->set_param('do', $action);
+    $response = wps3_api_migrate($request);
+    wp_send_json_success($response->get_data());
+});
+
 /**
  * Initialize the plugin.
  */
 function register_wps3()
 {
-    new WPS3();
+    WPS3::get_instance();
     add_filter('plugin_action_links_' . plugin_basename(WPS3_PLUGIN_FILE), function ($links) {
         $settings_link = '<a href="' . admin_url('options-general.php?page=wps3-settings') . '">' . __('Settings', 'wps3') . '</a>';
         array_unshift($links, $settings_link);
