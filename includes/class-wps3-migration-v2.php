@@ -85,6 +85,9 @@ class WPS3_Migration_V2 {
                         <button id="wps3-cancel" class="button" disabled>
                             <span class="dashicons dashicons-no"></span> Cancel
                         </button>
+                        <button id="wps3-force-complete" class="button" disabled style="margin-left: 10px;">
+                            <span class="dashicons dashicons-yes"></span> Force Complete
+                        </button>
                         <button id="wps3-debug" class="button" style="margin-left: 10px;">
                             <span class="dashicons dashicons-admin-tools"></span> Debug Info
                         </button>
@@ -172,16 +175,43 @@ class WPS3_Migration_V2 {
                 $('#wps3-pause').on('click', () => performAction('pause'));
                 $('#wps3-resume').on('click', () => performAction('resume'));
                 $('#wps3-cancel').on('click', () => performAction('cancel'));
+                $('#wps3-force-complete').on('click', () => performAction('force_complete'));
                 $('#wps3-debug').on('click', () => showDebugInfo());
             }
             
             // Perform migration action
             function performAction(action) {
-                const button = $('#wps3-' + action);
+                const button = $('#wps3-' + action.replace('_', '-'));
                 const originalText = button.html();
                 
                 button.prop('disabled', true).html('<span class="dashicons dashicons-update spin"></span> Processing...');
                 
+                // Handle force complete differently
+                if (action === 'force_complete') {
+                    $.ajax({
+                        url: AJAX_URL,
+                        method: 'POST',
+                        data: {
+                            action: 'wps3_force_complete',
+                            nonce: NONCE
+                        }
+                    }).done(function(response) {
+                        if (response.success && response.data) {
+                            updateUI(response.data.state || response.data);
+                            showMessage('Migration marked as complete!', 'success');
+                        } else {
+                            showError('Force complete failed: ' + (response.data?.message || 'Unknown error'));
+                        }
+                    }).fail(function(xhr) {
+                        console.error('Force complete failed:', xhr);
+                        showError('Force complete failed: ' + (xhr.responseJSON?.message || 'Network error'));
+                    }).always(function() {
+                        button.prop('disabled', false).html(originalText);
+                    });
+                    return;
+                }
+                
+                // Handle other actions normally
                 $.ajax({
                     url: AJAX_URL,
                     method: 'POST',
@@ -241,18 +271,83 @@ class WPS3_Migration_V2 {
                 $('#stat-total').text(state.total || 0);
                 $('#stat-status').text(formatStatus(state.status || 'ready'));
                 
-                // Calculate and display metrics
-                if (state.started_at && state.done > 0) {
-                    const elapsed = Math.max(1, Date.now() / 1000 - state.started_at);
-                    const speed = Math.round((state.done / elapsed) * 60); // per minute
-                    const remaining = (state.total || 0) - (state.done || 0);
-                    const eta = speed > 0 ? Math.round(remaining / speed) : 0;
-                    
-                    $('#stat-speed').text(speed + ' /min');
-                    $('#stat-elapsed').text(formatTime(elapsed));
-                    $('#stat-eta').text(eta > 0 ? formatTime(eta * 60) : '--');
+                // Calculate and display metrics based on migration status
+                const status = state.status || 'ready';
+                
+                if (status === 'ready' || (!state.started_at && state.done === 0)) {
+                    // Migration not started yet
+                    $('#stat-speed').text('--');
+                    $('#stat-elapsed').text('--');
+                    $('#stat-eta').text('--');
+                } else if (status === 'finished') {
+                    // Migration completed - show final stats
+                    if (state.started_at) {
+                        const totalElapsed = Math.max(1, Date.now() / 1000 - state.started_at);
+                        const finalSpeed = state.done > 0 ? Math.round((state.done / totalElapsed) * 60) : 0;
+                        
+                        $('#stat-speed').text(finalSpeed + ' /min (final)');
+                        $('#stat-elapsed').text(formatTime(totalElapsed) + ' (total)');
+                        $('#stat-eta').text('Complete ✅');
+                    } else {
+                        $('#stat-speed').text('--');
+                        $('#stat-elapsed').text('--');
+                        $('#stat-eta').text('Complete ✅');
+                    }
+                } else if (status === 'cancelled') {
+                    // Migration was cancelled - show stats up to cancellation
+                    if (state.started_at) {
+                        const cancelledElapsed = Math.max(1, Date.now() / 1000 - state.started_at);
+                        const cancelledSpeed = state.done > 0 ? Math.round((state.done / cancelledElapsed) * 60) : 0;
+                        
+                        $('#stat-speed').text(cancelledSpeed + ' /min (cancelled)');
+                        $('#stat-elapsed').text(formatTime(cancelledElapsed) + ' (before cancel)');
+                        $('#stat-eta').text('Cancelled ❌');
+                    } else {
+                        $('#stat-speed').text('0 /min');
+                        $('#stat-elapsed').text('--');
+                        $('#stat-eta').text('Cancelled ❌');
+                    }
+                } else if (status === 'error') {
+                    // Migration had an error - show stats up to error
+                    if (state.started_at) {
+                        const errorElapsed = Math.max(1, Date.now() / 1000 - state.started_at);
+                        const errorSpeed = state.done > 0 ? Math.round((state.done / errorElapsed) * 60) : 0;
+                        
+                        $('#stat-speed').text(errorSpeed + ' /min (error)');
+                        $('#stat-elapsed').text(formatTime(errorElapsed) + ' (before error)');
+                        $('#stat-eta').text('Error ⚠️');
+                    } else {
+                        $('#stat-speed').text('0 /min');
+                        $('#stat-elapsed').text('--');
+                        $('#stat-eta').text('Error ⚠️');
+                    }
+                } else if (['running', 'paused'].includes(status)) {
+                    // Migration is active - show live stats
+                    if (state.started_at) {
+                        const elapsed = Math.max(1, Date.now() / 1000 - state.started_at);
+                        const speed = state.done > 0 ? Math.round((state.done / elapsed) * 60) : 0;
+                        const remaining = (state.total || 0) - (state.done || 0);
+                        const eta = speed > 0 && remaining > 0 ? Math.round(remaining / speed) : 0;
+                        
+                        const speedSuffix = status === 'paused' ? ' (paused)' : '';
+                        $('#stat-speed').text(speed + ' /min' + speedSuffix);
+                        $('#stat-elapsed').text(formatTime(elapsed));
+                        
+                        if (status === 'paused') {
+                            $('#stat-eta').text('Paused ⏸️');
+                        } else if (eta > 0) {
+                            $('#stat-eta').text(formatTime(eta * 60));
+                        } else {
+                            $('#stat-eta').text('Calculating...');
+                        }
+                    } else {
+                        $('#stat-speed').text('0 /min');
+                        $('#stat-elapsed').text('--');
+                        $('#stat-eta').text(status === 'paused' ? 'Paused ⏸️' : 'Starting...');
+                    }
                 } else {
-                    $('#stat-speed').text('0 /min');
+                    // Fallback for unknown states
+                    $('#stat-speed').text('--');
                     $('#stat-elapsed').text('--');
                     $('#stat-eta').text('--');
                 }
@@ -288,6 +383,7 @@ class WPS3_Migration_V2 {
                 $('#wps3-pause').prop('disabled', !isRunning);
                 $('#wps3-resume').prop('disabled', !isPaused);
                 $('#wps3-cancel').prop('disabled', isFinished || !status || status === 'ready');
+                $('#wps3-force-complete').prop('disabled', isFinished || !status || status === 'ready');
             }
             
             // Format status for display
@@ -324,6 +420,20 @@ class WPS3_Migration_V2 {
             // Hide error message
             function hideError() {
                 $('#wps3-error').hide();
+            }
+            
+            // Show success message
+            function showMessage(message, type = 'info') {
+                const $message = $('<div>', {
+                    class: 'notice notice-' + type + ' is-dismissible',
+                    html: '<p>' + message + '</p>'
+                });
+                $('.wrap h1').after($message);
+                
+                // Auto-hide after 3 seconds
+                setTimeout(function() {
+                    $message.fadeOut();
+                }, 3000);
             }
             
             // Show debug information

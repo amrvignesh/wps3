@@ -743,6 +743,37 @@ class WPS3
             $this->wps3_log("Migrated {$uploaded_thumbnails} thumbnails for attachment {$attachment_id}", 'info');
         }
     }
+
+    /**
+     * Reset migration state for both legacy and v2 systems.
+     */
+    public function reset_migration_state() {
+        // Reset legacy migration state
+        update_option('wps3_migration_running', false);
+        update_option('wps3_migrated_files', 0);
+        update_option('wps3_migration_file_list', []);
+        delete_transient('wps3_migration_errors');
+        
+        // Reset v2 migration state
+        $default_state = [
+            'status' => 'ready',
+            'total' => 0,
+            'done' => 0,
+            'queued' => 0,
+            'processing' => 0,
+            'started_at' => 0,
+            'last_error' => '',
+            'batch_size' => 50,
+        ];
+        update_option('wps3_migration_state', $default_state);
+        
+        // Cancel any pending Action Scheduler jobs
+        if (function_exists('as_unschedule_all_actions')) {
+            as_unschedule_all_actions('wps3_do_batch', [], 'wps3');
+        }
+        
+        $this->wps3_log('Migration state reset to ready', 'info');
+    }
 }
 
 // Action Scheduler Integration for Background Jobs
@@ -793,11 +824,26 @@ function wps3_batch_worker($attachment_id) {
         $state['queued'] = max(0, $state['queued'] - 1);
         
         if (is_wp_error($result)) {
-            $state['last_error'] = $result->get_error_message();
-            WPS3_S3_Client::wps3_log("Migration failed for attachment {$attachment_id}: " . $result->get_error_message(), 'error');
+            $error_code = $result->get_error_code();
+            $error_message = $result->get_error_message();
+            
+            // For missing files, log but don't treat as critical error
+            if ($error_code === 'file_not_found') {
+                WPS3_S3_Client::wps3_log("File not found for attachment {$attachment_id}, marking as processed: {$error_message}", 'warning');
+                $state['last_error'] = ''; // Don't show file not found as last error
+            } else {
+                $state['last_error'] = $error_message;
+                WPS3_S3_Client::wps3_log("Migration failed for attachment {$attachment_id}: {$error_message}", 'error');
+            }
         } else {
             $state['last_error'] = '';
             WPS3_S3_Client::wps3_log("Successfully processed attachment {$attachment_id} in background job", 'info');
+        }
+        
+        // Check if migration is complete
+        if ($state['done'] >= $state['total'] && $state['processing'] <= 0 && $state['queued'] <= 0) {
+            $state['status'] = 'finished';
+            WPS3_S3_Client::wps3_log("Migration completed! Processed {$state['done']} of {$state['total']} files", 'info');
         }
         
         update_option('wps3_migration_state', $state);
@@ -805,7 +851,16 @@ function wps3_batch_worker($attachment_id) {
     } catch (Exception $e) {
         $state = get_option('wps3_migration_state', []); // Re-fetch to avoid race conditions
         $state['processing'] = max(0, $state['processing'] - 1);
+        $state['done'] += 1; // Still count as processed even if failed
+        $state['queued'] = max(0, $state['queued'] - 1);
         $state['last_error'] = $e->getMessage();
+        
+        // Check completion even after exception
+        if ($state['done'] >= $state['total'] && $state['processing'] <= 0 && $state['queued'] <= 0) {
+            $state['status'] = 'finished';
+            WPS3_S3_Client::wps3_log("Migration completed after exception! Processed {$state['done']} of {$state['total']} files", 'info');
+        }
+        
         update_option('wps3_migration_state', $state);
         WPS3_S3_Client::wps3_log("Background job exception for attachment {$attachment_id}: " . $e->getMessage(), 'error');
     }
@@ -983,6 +1038,38 @@ function wps3_api_status($request) {
         ];
     }
     
+    // Additional completion check for edge cases
+    if ($state['status'] === 'running' && $state['total'] > 0) {
+        // Check if migration should be marked as complete
+        if ($state['done'] >= $state['total'] && $state['processing'] <= 0 && $state['queued'] <= 0) {
+            $state['status'] = 'finished';
+            update_option('wps3_migration_state', $state);
+            WPS3_S3_Client::wps3_log("Migration marked as completed via status check. Processed {$state['done']} of {$state['total']} files", 'info');
+        }
+        // Also check for stale processing jobs - if no jobs have been active for too long
+        elseif ($state['processing'] > 0 && function_exists('as_get_scheduled_actions')) {
+            $pending_jobs = as_get_scheduled_actions([
+                'hook' => 'wps3_do_batch',
+                'status' => ['pending', 'in-progress'],
+                'per_page' => 1
+            ]);
+            
+            // If no actual pending jobs but state shows processing, fix the state
+            if (empty($pending_jobs)) {
+                $state['processing'] = 0;
+                $state['queued'] = 0;
+                
+                // Check completion again with corrected state
+                if ($state['done'] >= $state['total']) {
+                    $state['status'] = 'finished';
+                    WPS3_S3_Client::wps3_log("Migration completed after correcting stale processing count. Processed {$state['done']} of {$state['total']} files", 'info');
+                }
+                
+                update_option('wps3_migration_state', $state);
+            }
+        }
+    }
+    
     return rest_ensure_response($state);
 }
 
@@ -1021,6 +1108,38 @@ add_action('wp_ajax_wps3_state', function() {
         ];
     }
     
+    // Additional completion check for edge cases
+    if ($state['status'] === 'running' && $state['total'] > 0) {
+        // Check if migration should be marked as complete
+        if ($state['done'] >= $state['total'] && $state['processing'] <= 0 && $state['queued'] <= 0) {
+            $state['status'] = 'finished';
+            update_option('wps3_migration_state', $state);
+            WPS3_S3_Client::wps3_log("Migration marked as completed via AJAX status check. Processed {$state['done']} of {$state['total']} files", 'info');
+        }
+        // Also check for stale processing jobs
+        elseif ($state['processing'] > 0 && function_exists('as_get_scheduled_actions')) {
+            $pending_jobs = as_get_scheduled_actions([
+                'hook' => 'wps3_do_batch',
+                'status' => ['pending', 'in-progress'],
+                'per_page' => 1
+            ]);
+            
+            // If no actual pending jobs but state shows processing, fix the state
+            if (empty($pending_jobs)) {
+                $state['processing'] = 0;
+                $state['queued'] = 0;
+                
+                // Check completion again with corrected state
+                if ($state['done'] >= $state['total']) {
+                    $state['status'] = 'finished';
+                    WPS3_S3_Client::wps3_log("Migration completed after correcting stale processing count via AJAX. Processed {$state['done']} of {$state['total']} files", 'info');
+                }
+                
+                update_option('wps3_migration_state', $state);
+            }
+        }
+    }
+    
     wp_send_json_success($state);
 });
 
@@ -1036,6 +1155,43 @@ add_action('wp_ajax_wps3_api', function() {
     $request->set_param('do', $action);
     $response = wps3_api_migrate($request);
     wp_send_json_success($response->get_data());
+});
+
+// Add manual completion check endpoint
+add_action('wp_ajax_wps3_force_complete', function() {
+    // Verify nonce for admin-ajax requests
+    if (!wp_verify_nonce($_POST['nonce'] ?? '', 'wps3_nonce')) {
+        wp_send_json_error(['message' => 'Invalid nonce'], 403);
+        return;
+    }
+    
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Permission denied'], 403);
+        return;
+    }
+    
+    $state = get_option('wps3_migration_state', []);
+    
+    if ($state['status'] === 'running' && $state['total'] > 0) {
+        // Force completion check
+        if ($state['done'] >= $state['total'] || ($state['processing'] <= 0 && $state['queued'] <= 0)) {
+            $state['status'] = 'finished';
+            $state['processing'] = 0;
+            $state['queued'] = 0;
+            update_option('wps3_migration_state', $state);
+            
+            WPS3_S3_Client::wps3_log("Migration manually marked as completed. Processed {$state['done']} of {$state['total']} files", 'info');
+            
+            wp_send_json_success([
+                'message' => 'Migration marked as complete',
+                'state' => $state
+            ]);
+        } else {
+            wp_send_json_error(['message' => 'Migration is not ready to be completed']);
+        }
+    } else {
+        wp_send_json_error(['message' => 'Migration is not in running state']);
+    }
 });
 
 add_action('wp_ajax_wps3_debug', function() {
