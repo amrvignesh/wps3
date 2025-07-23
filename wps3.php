@@ -613,19 +613,44 @@ add_action('rest_api_init', function() {
     register_rest_route('wps3/v1', '/migrate', [
         'methods' => 'POST',
         'callback' => 'wps3_api_migrate',
-        'permission_callback' => function() {
-            return current_user_can('manage_options');
-        },
+        'permission_callback' => 'wps3_check_permissions',
+        'args' => [
+            'do' => [
+                'required' => true,
+                'type' => 'string',
+                'enum' => ['start', 'pause', 'resume', 'cancel'],
+            ],
+        ],
     ]);
     
     register_rest_route('wps3/v1', '/status', [
         'methods' => 'GET',
         'callback' => 'wps3_api_status',
-        'permission_callback' => function() {
-            return current_user_can('manage_options');
-        },
+        'permission_callback' => 'wps3_check_permissions',
     ]);
 });
+
+/**
+ * Check permissions for REST API endpoints
+ */
+function wps3_check_permissions($request) {
+    // Check if user has manage_options capability
+    if (!current_user_can('manage_options')) {
+        return false;
+    }
+    
+    // For admin-ajax requests, check nonce
+    if (defined('DOING_AJAX') && DOING_AJAX) {
+        return wp_verify_nonce($request->get_header('X-WP-Nonce'), 'wps3_nonce');
+    }
+    
+    // For REST requests, check if user is logged in and has proper capabilities
+    if (is_user_logged_in()) {
+        return true;
+    }
+    
+    return false;
+}
 
 /**
  * REST API endpoint for migration control
@@ -710,16 +735,52 @@ function wps3_api_migrate($request) {
  */
 function wps3_api_status($request) {
     $state = get_option('wps3_migration_state', []);
+    
+    // Set default values if state is empty
+    if (empty($state)) {
+        $state = [
+            'status' => 'ready',
+            'total' => 0,
+            'done' => 0,
+            'queued' => 0,
+            'processing' => 0,
+            'started_at' => 0,
+            'last_error' => '',
+            'batch_size' => 50,
+        ];
+    }
+    
     return rest_ensure_response($state);
 }
 
 // Admin AJAX shim for backward compatibility
 add_action('wp_ajax_wps3_state', function() {
     $state = get_option('wps3_migration_state', []);
+    
+    // Set default values if state is empty
+    if (empty($state)) {
+        $state = [
+            'status' => 'ready',
+            'total' => 0,
+            'done' => 0,
+            'queued' => 0,
+            'processing' => 0,
+            'started_at' => 0,
+            'last_error' => '',
+            'batch_size' => 50,
+        ];
+    }
+    
     wp_send_json_success($state);
 });
 
 add_action('wp_ajax_wps3_api', function() {
+    // Verify nonce for admin-ajax requests
+    if (!wp_verify_nonce($_POST['nonce'] ?? '', 'wps3_nonce')) {
+        wp_send_json_error(['message' => 'Invalid nonce'], 403);
+        return;
+    }
+    
     $action = sanitize_text_field($_POST['do'] ?? '');
     $request = new WP_REST_Request('POST', '/wps3/v1/migrate');
     $request->set_param('do', $action);

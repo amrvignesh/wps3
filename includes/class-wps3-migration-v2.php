@@ -152,7 +152,8 @@ class WPS3_Migration_V2 {
         (function($) {
             'use strict';
             
-            const API_BASE = wps3_ajax.rest_url;
+            const AJAX_URL = wps3_ajax.ajax_url;
+            const NONCE = wps3_ajax.nonce;
             let refreshTimer;
             let lastState = {};
             
@@ -178,19 +179,22 @@ class WPS3_Migration_V2 {
                 button.prop('disabled', true).html('<span class="dashicons dashicons-update spin"></span> Processing...');
                 
                 $.ajax({
-                    url: API_BASE + 'migrate',
+                    url: AJAX_URL,
                     method: 'POST',
-                    data: { do: action },
-                    headers: {
-                        'X-WP-Nonce': wps3_ajax.nonce
+                    data: {
+                        action: 'wps3_api',
+                        do: action,
+                        nonce: NONCE
                     }
                 }).done(function(response) {
-                    if (response && response.status) {
-                        updateUI(response);
+                    if (response.success && response.data) {
+                        updateUI(response.data);
+                    } else {
+                        showError('Action failed: ' + (response.data?.message || 'Unknown error'));
                     }
                 }).fail(function(xhr) {
                     console.error('Action failed:', xhr);
-                    showError('Action failed: ' + (xhr.responseJSON?.message || 'Unknown error'));
+                    showError('Action failed: ' + (xhr.responseJSON?.message || 'Network error'));
                 }).always(function() {
                     button.prop('disabled', false).html(originalText);
                 });
@@ -199,14 +203,15 @@ class WPS3_Migration_V2 {
             // Refresh migration status
             function refresh() {
                 $.ajax({
-                    url: API_BASE + 'status',
-                    method: 'GET',
-                    headers: {
-                        'X-WP-Nonce': wps3_ajax.nonce
+                    url: AJAX_URL,
+                    method: 'POST',
+                    data: {
+                        action: 'wps3_state',
+                        nonce: NONCE
                     }
                 }).done(function(response) {
-                    if (response) {
-                        updateUI(response);
+                    if (response.success && response.data) {
+                        updateUI(response.data);
                     }
                 }).fail(function(xhr) {
                     console.error('Status refresh failed:', xhr);
@@ -278,7 +283,7 @@ class WPS3_Migration_V2 {
                 $('#wps3-start').prop('disabled', isRunning || isPaused);
                 $('#wps3-pause').prop('disabled', !isRunning);
                 $('#wps3-resume').prop('disabled', !isPaused);
-                $('#wps3-cancel').prop('disabled', isFinished || !status);
+                $('#wps3-cancel').prop('disabled', isFinished || !status || status === 'ready');
             }
             
             // Format status for display
