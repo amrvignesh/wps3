@@ -119,9 +119,12 @@ class WPS3
         $source_file_path = $file_data['file'];
         $upload_dir_info = wp_upload_dir();
         $relative_path = str_replace(trailingslashit($upload_dir_info['basedir']), '', $source_file_path);
-        $unique_filename = basename($source_file_path);
+        
+        // CRITICAL: Use the full relative path as the unique identifier, not just the filename
+        // This ensures that WordPress's file renaming (fresh.gif -> fresh-1.gif -> fresh-2.gif) is respected
+        $unique_identifier = $relative_path;
 
-        // Construct the S3 object key
+        // Construct the S3 object key using the full relative path
         $key_parts = [];
         if (!empty($this->s3_client_wrapper->get_bucket_folder())) {
             $key_parts[] = trim($this->s3_client_wrapper->get_bucket_folder(), '/');
@@ -150,14 +153,15 @@ class WPS3
             // Update the file info with S3 data
             $file_data['url'] = $s3_url;
             
-            // Store S3 info temporarily for upload_attachment to pick up
-            $this->uploaded_file_s3_info[$unique_filename] = [
+            // Store S3 info temporarily using the full relative path as key
+            // This ensures each renamed file gets its own unique S3 entry
+            $this->uploaded_file_s3_info[$unique_identifier] = [
                 'bucket' => $this->s3_client_wrapper->get_bucket_name(),
                 'key'    => $s3_object_key,
                 'url'    => $s3_url,
             ];
             
-            $this->wps3_log("Successfully uploaded main file to S3: $source_file_path -> $s3_object_key", 'info');
+            $this->wps3_log("Successfully uploaded main file to S3: $source_file_path -> $s3_object_key (identifier: $unique_identifier)", 'info');
             
             // Fire action after successful upload
             do_action('wps3_after_upload', $source_file_path, $s3_object_key, $s3_url, $file_data);
@@ -215,16 +219,19 @@ class WPS3
             return;
         }
         
-        // Get the filename that WordPress has saved
+        // Get the filename that WordPress has saved (this includes any renaming WordPress did)
         $attached_file_path_relative = get_post_meta($attachment_id, '_wp_attached_file', true);
         if (empty($attached_file_path_relative)) {
             return;
         }
-        $unique_filename = basename($attached_file_path_relative);
+        
+        // CRITICAL: Use the full relative path as the unique identifier, not just the filename
+        // This matches what we used in upload_overrides()
+        $unique_identifier = $attached_file_path_relative;
 
-        // Check if we have temporary S3 info for this filename
-        if (isset($this->uploaded_file_s3_info[$unique_filename])) {
-            $s3_info = $this->uploaded_file_s3_info[$unique_filename];
+        // Check if we have temporary S3 info for this unique identifier
+        if (isset($this->uploaded_file_s3_info[$unique_identifier])) {
+            $s3_info = $this->uploaded_file_s3_info[$unique_identifier];
             
             // Save the S3 info as permanent post meta. This is the official tracking record.
             update_post_meta($attachment_id, 'wps3_s3_info', $s3_info);
@@ -273,11 +280,11 @@ class WPS3
             }
             
             // Clean up the temporary storage
-            unset($this->uploaded_file_s3_info[$unique_filename]);
+            unset($this->uploaded_file_s3_info[$unique_identifier]);
             
             $this->wps3_log("Successfully processed attachment ID: $attachment_id with S3 info: " . print_r($s3_info, true), 'info');
         } else {
-            $this->wps3_log("No temporary S3 info found for attachment ID: $attachment_id, filename: $unique_filename", 'warning');
+            $this->wps3_log("No temporary S3 info found for attachment ID: $attachment_id, identifier: $unique_identifier. Available identifiers: " . implode(', ', array_keys($this->uploaded_file_s3_info)), 'warning');
         }
     }
 

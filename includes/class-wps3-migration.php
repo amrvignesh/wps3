@@ -230,6 +230,7 @@ class WPS3_Migration {
         if ($complete) {
             update_option('wps3_migration_running', false);
             update_option('wps3_migration_file_list', []);
+            $this->wps3_log("Legacy migration completed! Processed {$new_migrated_count} of {$total_files} files", 'info');
         }
 
         wp_send_json_success([
