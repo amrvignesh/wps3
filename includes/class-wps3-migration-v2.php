@@ -85,6 +85,9 @@ class WPS3_Migration_V2 {
                         <button id="wps3-cancel" class="button" disabled>
                             <span class="dashicons dashicons-no"></span> Cancel
                         </button>
+                        <button id="wps3-debug" class="button" style="margin-left: 10px;">
+                            <span class="dashicons dashicons-admin-tools"></span> Debug Info
+                        </button>
                     </div>
                     
                     <div class="wps3-progress-section">
@@ -169,6 +172,7 @@ class WPS3_Migration_V2 {
                 $('#wps3-pause').on('click', () => performAction('pause'));
                 $('#wps3-resume').on('click', () => performAction('resume'));
                 $('#wps3-cancel').on('click', () => performAction('cancel'));
+                $('#wps3-debug').on('click', () => showDebugInfo());
             }
             
             // Perform migration action
@@ -320,6 +324,59 @@ class WPS3_Migration_V2 {
             // Hide error message
             function hideError() {
                 $('#wps3-error').hide();
+            }
+            
+            // Show debug information
+            function showDebugInfo() {
+                $.ajax({
+                    url: AJAX_URL,
+                    method: 'POST',
+                    data: {
+                        action: 'wps3_debug',
+                        nonce: NONCE
+                    }
+                }).done(function(response) {
+                    if (response.success && response.data) {
+                        const info = response.data;
+                        let debugHtml = '<div style="background: #f1f1f1; padding: 15px; border-radius: 5px; margin: 10px 0; font-family: monospace; font-size: 12px;">';
+                        debugHtml += '<h4>🔧 Debug Information</h4>';
+                        debugHtml += '<p><strong>Plugin Enabled:</strong> ' + (info.plugin_enabled ? '✅ Yes' : '❌ No') + '</p>';
+                        debugHtml += '<p><strong>S3 Client Available:</strong> ' + (info.s3_client_available ? '✅ Yes' : '❌ No') + '</p>';
+                        debugHtml += '<p><strong>Action Scheduler:</strong> ' + (info.action_scheduler_available ? '✅ Available' : '❌ Not Available') + '</p>';
+                        debugHtml += '<p><strong>Bucket Name:</strong> ' + (info.bucket_name || 'Not set') + '</p>';
+                        debugHtml += '<p><strong>Endpoint URL:</strong> ' + (info.s3_endpoint_url || 'Not set') + '</p>';
+                        debugHtml += '<p><strong>Region:</strong> ' + (info.s3_region || 'Not set') + '</p>';
+                        debugHtml += '<p><strong>Access Key:</strong> ' + info.access_key + '</p>';
+                        debugHtml += '<p><strong>Secret Key:</strong> ' + info.secret_key + '</p>';
+                        debugHtml += '<p><strong>Attachments Needing Migration:</strong> ' + (info.total_attachments_needing_migration || 0) + '</p>';
+                        
+                        if (info.migration_state && Object.keys(info.migration_state).length > 0) {
+                            debugHtml += '<p><strong>Migration State:</strong> ' + JSON.stringify(info.migration_state, null, 2) + '</p>';
+                        }
+                        
+                        if (info.sample_attachments && info.sample_attachments.length > 0) {
+                            debugHtml += '<p><strong>Sample Attachments:</strong></p>';
+                            debugHtml += '<ul>';
+                            info.sample_attachments.forEach(function(att) {
+                                debugHtml += '<li>ID: ' + att.ID + ', File: ' + att.file_path + '</li>';
+                            });
+                            debugHtml += '</ul>';
+                        }
+                        
+                        debugHtml += '</div>';
+                        
+                        // Show debug info in a modal-like overlay
+                        $('body').append('<div id="wps3-debug-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10000; display: flex; align-items: center; justify-content: center;"><div style="background: white; padding: 20px; border-radius: 10px; max-width: 80%; max-height: 80%; overflow: auto;"><button id="wps3-close-debug" style="float: right; margin-bottom: 10px;">Close</button>' + debugHtml + '</div></div>');
+                        
+                        $('#wps3-close-debug').on('click', function() {
+                            $('#wps3-debug-overlay').remove();
+                        });
+                    } else {
+                        showError('Failed to get debug info: ' + (response.data?.message || 'Unknown error'));
+                    }
+                }).fail(function(xhr) {
+                    showError('Debug request failed: ' + (xhr.responseJSON?.message || 'Network error'));
+                });
             }
             
             // Initialize when document is ready
