@@ -96,35 +96,35 @@ class WPS3_Migration_V2 {
                         
                         <div class="wps3-stats-grid">
                             <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">Uploaded</div>
+                                <div class="wps3-stat-label">✅ Completed</div>
                                 <div class="wps3-stat-value" id="stat-done">0</div>
                             </div>
                             <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">Processing</div>
+                                <div class="wps3-stat-label">⚡ In Progress</div>
                                 <div class="wps3-stat-value" id="stat-processing">0</div>
                             </div>
                             <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">Waiting</div>
+                                <div class="wps3-stat-label">⏳ Queued</div>
                                 <div class="wps3-stat-value" id="stat-waiting">0</div>
                             </div>
                             <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">Total</div>
+                                <div class="wps3-stat-label">📁 Total Files</div>
                                 <div class="wps3-stat-value" id="stat-total">0</div>
                             </div>
                             <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">Speed</div>
+                                <div class="wps3-stat-label">🚀 Upload Rate</div>
                                 <div class="wps3-stat-value" id="stat-speed">0 /min</div>
                             </div>
                             <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">Elapsed</div>
+                                <div class="wps3-stat-label">⏱️ Time Running</div>
                                 <div class="wps3-stat-value" id="stat-elapsed">--</div>
                             </div>
                             <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">ETA</div>
+                                <div class="wps3-stat-label">⏰ Time Remaining</div>
                                 <div class="wps3-stat-value" id="stat-eta">--</div>
                             </div>
                             <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">Status</div>
+                                <div class="wps3-stat-label">📊 Migration Status</div>
                                 <div class="wps3-stat-value" id="stat-status">Ready</div>
                             </div>
                         </div>
