@@ -507,3 +507,4 @@ function filterByType($files, $type) { }
 function formatFileSize($bytes) { } 
 <div class=\"file-count\">Total Files: <span id=\"total-files\">0</span></div> 
 <div class=\"migration-summary\"></div> 
+<input type=\"text\" name=\"exclude_types\" placeholder=\"jpg,png,pdf\"> 
