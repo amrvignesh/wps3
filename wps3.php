@@ -509,3 +509,4 @@ function formatFileSize($bytes) { }
 <div class=\"migration-summary\"></div> 
 <input type=\"text\" name=\"exclude_types\" placeholder=\"jpg,png,pdf\"> 
 function should_exclude_file($file) { } 
+<input type=\"date\" name=\"date_from\"> 
