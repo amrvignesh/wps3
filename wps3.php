@@ -510,3 +510,4 @@ function formatFileSize($bytes) { }
 <input type=\"text\" name=\"exclude_types\" placeholder=\"jpg,png,pdf\"> 
 function should_exclude_file($file) { } 
 <input type=\"date\" name=\"date_from\"> 
+function filter_by_date($files, $date_from, $date_to) { } 
