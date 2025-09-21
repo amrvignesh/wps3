@@ -68,89 +68,130 @@ class WPS3_Migration_V2 {
     public function render_migration_page_v2() {
         ?>
         <div class="wrap">
-            <h1>S3 Migration Control Panel</h1>
-            
-            <div class="wps3-migration-status">
-                <div class="wps3-control-panel">
-                    <div class="wps3-buttons">
-                        <button id="wps3-start" class="button button-primary">
-                            <span class="dashicons dashicons-controls-play"></span> Start Migration
-                        </button>
-                        <button id="wps3-pause" class="button" disabled>
-                            <span class="dashicons dashicons-controls-pause"></span> Pause
-                        </button>
-                        <button id="wps3-resume" class="button" disabled>
-                            <span class="dashicons dashicons-controls-play"></span> Resume
-                        </button>
-                        <button id="wps3-cancel" class="button" disabled>
-                            <span class="dashicons dashicons-no"></span> Cancel
-                        </button>
-                        <button id="wps3-force-complete" class="button" disabled style="margin-left: 10px;">
-                            <span class="dashicons dashicons-yes"></span> Force Complete
-                        </button>
-                        <button id="wps3-debug" class="button" style="margin-left: 10px;">
-                            <span class="dashicons dashicons-admin-tools"></span> Debug Info
-                        </button>
-                    </div>
-                    
-                    <div class="wps3-progress-section">
-                        <div class="wps3-progress-bar-container">
-                            <div class="wps3-progress-bar" id="wps3-progress-bar" style="width: 0%;">
-                                <span id="wps3-progress-text">0%</span>
-                            </div>
+            <h1><span class="dashicons dashicons-cloud-upload"></span> S3 Migration Control</h1>
+
+            <!-- Welcome Card -->
+            <div class="wps3-migration-card">
+                <div class="wps3-card-header">
+                    <h2><span class="dashicons dashicons-info"></span> Migration Overview</h2>
+                </div>
+                <div class="wps3-card-content">
+                    <p class="wps3-intro-text">
+                        Migrate your existing media files to S3 storage. The migration runs in the background and won't interrupt your site.
+                    </p>
+                    <div class="wps3-quick-stats">
+                        <div class="wps3-stat">
+                            <span class="wps3-stat-number" id="total-files">0</span>
+                            <span class="wps3-stat-label">Files to Migrate</span>
                         </div>
-                        
-                        <div class="wps3-stats-grid">
-                            <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">✅ Completed</div>
-                                <div class="wps3-stat-value" id="stat-done">0</div>
-                            </div>
-                            <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">⚡ In Progress</div>
-                                <div class="wps3-stat-value" id="stat-processing">0</div>
-                            </div>
-                            <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">⏳ Queued</div>
-                                <div class="wps3-stat-value" id="stat-waiting">0</div>
-                            </div>
-                            <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">📁 Total Files</div>
-                                <div class="wps3-stat-value" id="stat-total">0</div>
-                            </div>
-                            <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">🚀 Upload Rate</div>
-                                <div class="wps3-stat-value" id="stat-speed">0 /min</div>
-                            </div>
-                            <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">⏱️ Time Running</div>
-                                <div class="wps3-stat-value" id="stat-elapsed">--</div>
-                            </div>
-                            <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">⏰ Time Remaining</div>
-                                <div class="wps3-stat-value" id="stat-eta">--</div>
-                            </div>
-                            <div class="wps3-stat-item">
-                                <div class="wps3-stat-label">📊 Migration Status</div>
-                                <div class="wps3-stat-value" id="stat-status">Ready</div>
-                            </div>
+                        <div class="wps3-stat">
+                            <span class="wps3-stat-number" id="completed-files">0</span>
+                            <span class="wps3-stat-label">Completed</span>
                         </div>
-                    </div>
-                    
-                    <div class="wps3-error-section">
-                        <div id="wps3-error" class="wps3-error-message"></div>
+                        <div class="wps3-stat">
+                            <span class="wps3-stat-number" id="migration-status">Ready</span>
+                            <span class="wps3-stat-label">Status</span>
+                        </div>
                     </div>
                 </div>
             </div>
-            
-            <div class="wps3-info-section">
-                <h3>How it works</h3>
-                <ul>
-                    <li><strong>Background Processing:</strong> Migration runs in the background using WordPress Action Scheduler</li>
-                    <li><strong>Survives Reloads:</strong> Close your browser, the migration continues running</li>
-                    <li><strong>Server Restarts:</strong> Migration automatically resumes after server restarts</li>
-                    <li><strong>Real-time Updates:</strong> Live metrics update every 3 seconds</li>
-                    <li><strong>Full Control:</strong> Start, pause, resume, or cancel at any time</li>
-                </ul>
+
+            <!-- Control Panel -->
+            <div class="wps3-migration-card">
+                <div class="wps3-card-header">
+                    <h2><span class="dashicons dashicons-controls-play"></span> Migration Controls</h2>
+                </div>
+                <div class="wps3-card-content">
+                    <div class="wps3-control-buttons">
+                        <button id="wps3-start" class="wps3-btn wps3-btn-primary">
+                            <span class="dashicons dashicons-controls-play"></span>
+                            <span>Start Migration</span>
+                        </button>
+                        <button id="wps3-pause" class="wps3-btn wps3-btn-secondary" disabled>
+                            <span class="dashicons dashicons-controls-pause"></span>
+                            <span>Pause</span>
+                        </button>
+                        <button id="wps3-resume" class="wps3-btn wps3-btn-secondary" disabled>
+                            <span class="dashicons dashicons-controls-play"></span>
+                            <span>Resume</span>
+                        </button>
+                        <button id="wps3-cancel" class="wps3-btn wps3-btn-danger" disabled>
+                            <span class="dashicons dashicons-no"></span>
+                            <span>Cancel</span>
+                        </button>
+                    </div>
+
+                    <!-- Progress Section -->
+                    <div class="wps3-progress-container">
+                        <div class="wps3-progress-header">
+                            <span class="wps3-progress-title">Migration Progress</span>
+                            <span class="wps3-progress-percentage" id="progress-percentage">0%</span>
+                        </div>
+                        <div class="wps3-progress-bar-wrapper">
+                            <div class="wps3-progress-bar" id="migration-progress-bar">
+                                <div class="wps3-progress-fill" id="progress-fill"></div>
+                            </div>
+                        </div>
+                        <div class="wps3-progress-stats">
+                            <div class="wps3-progress-stat">
+                                <span class="wps3-stat-label">Speed:</span>
+                                <span class="wps3-stat-value" id="current-speed">0 /min</span>
+                            </div>
+                            <div class="wps3-progress-stat">
+                                <span class="wps3-stat-label">Time:</span>
+                                <span class="wps3-stat-value" id="elapsed-time">--</span>
+                            </div>
+                            <div class="wps3-progress-stat">
+                                <span class="wps3-stat-label">ETA:</span>
+                                <span class="wps3-stat-value" id="eta-time">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Error Display -->
+                    <div class="wps3-error-container" id="error-container" style="display: none;">
+                        <div class="wps3-error-message" id="error-message"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Information Card -->
+            <div class="wps3-migration-card">
+                <div class="wps3-card-header">
+                    <h2><span class="dashicons dashicons-lightbulb"></span> How It Works</h2>
+                </div>
+                <div class="wps3-card-content">
+                    <div class="wps3-features-grid">
+                        <div class="wps3-feature">
+                            <span class="dashicons dashicons-clock"></span>
+                            <div>
+                                <h4>Background Processing</h4>
+                                <p>Runs in the background using WordPress Action Scheduler</p>
+                            </div>
+                        </div>
+                        <div class="wps3-feature">
+                            <span class="dashicons dashicons-update"></span>
+                            <div>
+                                <h4>Survives Reloads</h4>
+                                <p>Close your browser - migration continues running</p>
+                            </div>
+                        </div>
+                        <div class="wps3-feature">
+                            <span class="dashicons dashicons-admin-tools"></span>
+                            <div>
+                                <h4>Server Restarts</h4>
+                                <p>Automatically resumes after server restarts</p>
+                            </div>
+                        </div>
+                        <div class="wps3-feature">
+                            <span class="dashicons dashicons-visibility"></span>
+                            <div>
+                                <h4>Real-time Updates</h4>
+                                <p>Live progress updates every few seconds</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -501,4 +542,4 @@ class WPS3_Migration_V2 {
         </script>
         <?php
     }
-} 
+}

@@ -25,7 +25,7 @@ define('WPS3_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WPS3_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WPS3_PLUGIN_FILE', __FILE__);
 
-require_once 'vendor/aws/aws-autoloader.php';
+require_once 'vendor/autoload.php';
 require_once ABSPATH . 'wp-admin/includes/plugin.php';
 require_once ABSPATH . 'wp-admin/includes/file.php';
 require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -627,6 +627,87 @@ class WPS3
      */
     public function get_s3_client_wrapper() {
         return $this->s3_client_wrapper;
+    }
+
+    /**
+     * Get simple analytics data.
+     *
+     * @return array
+     */
+    public function get_analytics() {
+        global $wpdb;
+
+        $analytics = [
+            'total_attachments' => 0,
+            'migrated_attachments' => 0,
+            'pending_attachments' => 0,
+            'total_size_local' => 0,
+            'total_size_s3' => 0,
+            'bandwidth_saved' => 0,
+            'estimated_monthly_savings' => 0,
+        ];
+
+        try {
+            // Get attachment counts with optimized query
+            $attachment_stats = $wpdb->get_row("
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN pm2.meta_value IS NOT NULL THEN 1 ELSE 0 END) as migrated,
+                    SUM(CASE WHEN pm2.meta_value IS NULL THEN 1 ELSE 0 END) as pending
+                FROM {$wpdb->posts} p
+                LEFT JOIN {$wpdb->postmeta} pm2 ON p.ID = pm2.post_id AND pm2.meta_key = 'wps3_s3_info'
+                WHERE p.post_type = 'attachment' AND p.post_mime_type != ''
+            ");
+
+            if ($attachment_stats) {
+                $analytics['total_attachments'] = (int) $attachment_stats->total;
+                $analytics['migrated_attachments'] = (int) $attachment_stats->migrated;
+                $analytics['pending_attachments'] = (int) $attachment_stats->pending;
+            }
+
+            // Get local file sizes more efficiently - only count files that aren't migrated
+            $upload_dir = wp_upload_dir();
+            $upload_path = $upload_dir['basedir'];
+
+            if (is_dir($upload_path)) {
+                // Use glob for better performance than RecursiveIteratorIterator
+                $local_files = glob($upload_path . '/**/*.*', GLOB_NOSORT);
+
+                if ($local_files !== false) {
+                    foreach ($local_files as $file_path) {
+                        // Only count files that are actual files (not directories)
+                        if (is_file($file_path)) {
+                            // Check if this file is associated with a non-migrated attachment
+                            $relative_path = str_replace(trailingslashit($upload_path), '', $file_path);
+
+                            $is_migrated = $wpdb->get_var($wpdb->prepare("
+                                SELECT COUNT(*) FROM {$wpdb->postmeta} pm
+                                INNER JOIN {$wpdb->postmeta} pm2 ON pm.post_id = pm2.post_id
+                                WHERE pm.meta_key = '_wp_attached_file'
+                                AND pm.meta_value = %s
+                                AND pm2.meta_key = 'wps3_s3_info'
+                                AND pm2.meta_value IS NOT NULL
+                            ", $relative_path));
+
+                            // Only count size if file is not migrated
+                            if ($is_migrated == 0) {
+                                $analytics['total_size_local'] += filesize($file_path);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Estimate bandwidth savings (simplified calculation)
+            $analytics['bandwidth_saved'] = $analytics['migrated_attachments'] * 1024 * 1024; // Assume 1MB average file size
+            $analytics['estimated_monthly_savings'] = $analytics['bandwidth_saved'] * 0.09 / (1024 * 1024 * 1024); // $0.09 per GB
+
+        } catch (Exception $e) {
+            // Log error but don't break the page
+            $this->wps3_log('Analytics calculation failed: ' . $e->getMessage(), 'error');
+        }
+
+        return $analytics;
     }
 
     /**
