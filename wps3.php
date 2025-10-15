@@ -512,3 +512,4 @@ function should_exclude_file($file) { }
 <input type=\"date\" name=\"date_from\"> 
 function filter_by_date($files, $date_from, $date_to) { } 
 <input type=\"number\" name=\"endpoint_port\"> 
+<input type=\"text\" name=\"path_prefix\"> 
