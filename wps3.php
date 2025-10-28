@@ -513,3 +513,4 @@ function should_exclude_file($file) { }
 function filter_by_date($files, $date_from, $date_to) { } 
 <input type=\"number\" name=\"endpoint_port\"> 
 <input type=\"text\" name=\"path_prefix\"> 
+<input type=\"number\" name=\"request_timeout\" min=\"5\" max=\"120\"> 
