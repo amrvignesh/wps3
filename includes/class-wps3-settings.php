@@ -12,6 +12,10 @@ class WPS3_Settings {
         add_action('admin_menu', [$this, 'add_admin_menu']);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_scripts']);
+        
+        // AJAX handlers with nonce verification
+        add_action('wp_ajax_wps3_test_connection', [$this, 'ajax_test_connection']);
+        add_action('wp_ajax_wps3_get_storage_usage', [$this, 'ajax_get_storage_usage']);
     }
 
     /**
@@ -295,66 +299,14 @@ class WPS3_Settings {
                 <form method="post" action="options.php" class="wps3-settings-form">
                     <?php settings_fields('wps3'); ?>
 
-                    <!-- Basic Settings Card -->
+                    <!-- Settings Card -->
                     <div class="wps3-settings-card">
                         <div class="wps3-card-header">
-                            <h2><span class="dashicons dashicons-admin-generic"></span> <?php _e('Basic Settings', 'wps3'); ?></h2>
-                            <p class="wps3-card-description"><?php _e('Enable the plugin and configure basic options.', 'wps3'); ?></p>
+                            <h2><span class="dashicons dashicons-admin-settings"></span> <?php _e('Plugin Configuration', 'wps3'); ?></h2>
+                            <p class="wps3-card-description"><?php _e('Configure your S3 storage and plugin options.', 'wps3'); ?></p>
                         </div>
                         <div class="wps3-card-content">
                             <?php do_settings_sections('wps3'); ?>
-                        </div>
-                    </div>
-
-                    <!-- S3 Configuration Card -->
-                    <div class="wps3-settings-card">
-                        <div class="wps3-card-header">
-                            <h2><span class="dashicons dashicons-cloud"></span> <?php _e('S3 Configuration', 'wps3'); ?></h2>
-                            <p class="wps3-card-description"><?php _e('Configure your S3-compatible storage settings.', 'wps3'); ?></p>
-                        </div>
-                        <div class="wps3-card-content">
-                            <div class="wps3-form-row">
-                                <div class="wps3-form-group">
-                                    <?php $this->settings_field_bucket_name_callback(); ?>
-                                </div>
-                                <div class="wps3-form-group">
-                                    <?php $this->settings_field_bucket_folder_callback(); ?>
-                                </div>
-                            </div>
-                            <div class="wps3-form-row">
-                                <div class="wps3-form-group">
-                                    <?php $this->settings_field_s3_endpoint_url_callback(); ?>
-                                </div>
-                                <div class="wps3-form-group">
-                                    <?php $this->settings_field_s3_region_callback(); ?>
-                                </div>
-                            </div>
-                            <div class="wps3-form-row">
-                                <div class="wps3-form-group">
-                                    <?php $this->settings_field_access_key_callback(); ?>
-                                </div>
-                                <div class="wps3-form-group">
-                                    <?php $this->settings_field_secret_key_callback(); ?>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Advanced Settings Card -->
-                    <div class="wps3-settings-card">
-                        <div class="wps3-card-header">
-                            <h2><span class="dashicons dashicons-admin-settings"></span> <?php _e('Advanced Settings', 'wps3'); ?></h2>
-                            <p class="wps3-card-description"><?php _e('Optional settings for CDN and file management.', 'wps3'); ?></p>
-                        </div>
-                        <div class="wps3-card-content">
-                            <div class="wps3-form-row">
-                                <div class="wps3-form-group">
-                                    <?php $this->settings_field_cdn_domain_callback(); ?>
-                                </div>
-                                <div class="wps3-form-group">
-                                    <?php $this->settings_field_delete_local_callback(); ?>
-                                </div>
-                            </div>
                         </div>
                     </div>
 
@@ -384,7 +336,107 @@ class WPS3_Settings {
                             <span class="wps3-status-label"><?php _e('Bucket:', 'wps3'); ?></span>
                             <span class="wps3-status-value"><?php echo esc_html(get_option('wps3_bucket_name')); ?></span>
                         </div>
+                        <div class="wps3-status-item">
+                            <span class="wps3-status-label"><?php _e('S3 Storage Used:', 'wps3'); ?></span>
+                            <span class="wps3-status-value" id="wps3-storage-usage">
+                                <span class="spinner" style="float: none; margin: 0;"></span>
+                            </span>
+                        </div>
                         <?php endif; ?>
+                        
+                        <!-- Connection Test Button -->
+                        <div class="wps3-status-item" style="border: none; padding-top: 15px;">
+                            <button type="button" id="wps3-test-connection-btn" class="button button-secondary" style="width: 100%;">
+                                <span class="dashicons dashicons-yes-alt"></span>
+                                <?php _e('Test S3 Connection', 'wps3'); ?>
+                            </button>
+                        </div>
+                        <div id="wps3-connection-result" style="display: none; margin-top: 10px;"></div>
+                    </div>
+                </div>
+                
+                <!-- Help & Resources Card -->
+                <div class="wps3-settings-card">
+                    <div class="wps3-card-header">
+                        <h2><span class="dashicons dashicons-editor-help"></span> <?php _e('Help & Resources', 'wps3'); ?></h2>
+                    </div>
+                    <div class="wps3-card-content">
+                        <div class="wps3-help-section">
+                            <h4><?php _e('Sample S3 URL Format', 'wps3'); ?></h4>
+                            <div class="wps3-sample-url">
+                                <p><strong><?php _e('For AWS S3:', 'wps3'); ?></strong></p>
+                                <code>https://s3.us-west-2.amazonaws.com</code>
+                                <p style="margin-top: 10px;"><strong><?php _e('For DigitalOcean Spaces:', 'wps3'); ?></strong></p>
+                                <code>https://nyc3.digitaloceanspaces.com</code>
+                                <p style="margin-top: 10px;"><strong><?php _e('For Custom S3:', 'wps3'); ?></strong></p>
+                                <code>https://s3.example.com</code>
+                            </div>
+                        </div>
+                        
+                        <div class="wps3-help-section" style="margin-top: 15px;">
+                            <h4><?php _e('Quick Links', 'wps3'); ?></h4>
+                            <ul class="wps3-help-links">
+                                <li>
+                                    <a href="#" id="wps3-show-faq">
+                                        <span class="dashicons dashicons-format-chat"></span>
+                                        <?php _e('Frequently Asked Questions', 'wps3'); ?>
+                                    </a>
+                                </li>
+                                <li>
+                                    <a href="<?php echo admin_url('upload.php?page=wps3-migration'); ?>">
+                                        <span class="dashicons dashicons-migrate"></span>
+                                        <?php _e('Go to Migration Dashboard', 'wps3'); ?>
+                                    </a>
+                                </li>
+                                <li>
+                                    <a href="https://github.com/amrvignesh/wps3" target="_blank">
+                                        <span class="dashicons dashicons-external"></span>
+                                        <?php _e('Documentation & Troubleshooting', 'wps3'); ?>
+                                    </a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- FAQ Overlay (Hidden by default) -->
+                <div id="wps3-faq-overlay" style="display: none;">
+                    <div class="wps3-faq-modal">
+                        <div class="wps3-faq-header">
+                            <h2><?php _e('Frequently Asked Questions', 'wps3'); ?></h2>
+                            <button type="button" id="wps3-close-faq" class="button">×</button>
+                        </div>
+                        <div class="wps3-faq-content">
+                            <div class="wps3-faq-item">
+                                <h3><?php _e('Will my existing media files be automatically uploaded to S3?', 'wps3'); ?></h3>
+                                <p><?php _e('No. Only new files uploaded after enabling the plugin will go to S3. To migrate existing files, use the Migration Dashboard.', 'wps3'); ?></p>
+                            </div>
+                            
+                            <div class="wps3-faq-item">
+                                <h3><?php _e('What happens if I disable the plugin?', 'wps3'); ?></h3>
+                                <p><?php _e('Your media files will remain on S3, but URLs will no longer be rewritten. You may experience broken images until you re-enable the plugin or migrate files back.', 'wps3'); ?></p>
+                            </div>
+                            
+                            <div class="wps3-faq-item">
+                                <h3><?php _e('Can I use a CDN with this plugin?', 'wps3'); ?></h3>
+                                <p><?php _e('Yes! Enter your CDN domain in the "CDN Domain" field under Advanced Settings. All S3 URLs will be rewritten to use your CDN.', 'wps3'); ?></p>
+                            </div>
+                            
+                            <div class="wps3-faq-item">
+                                <h3><?php _e('Is it safe to enable "Delete Local Files"?', 'wps3'); ?></h3>
+                                <p><?php _e('Only enable this after confirming your S3 connection works properly. Local files will be deleted immediately after successful S3 upload.', 'wps3'); ?></p>
+                            </div>
+                            
+                            <div class="wps3-faq-item">
+                                <h3><?php _e('How much will bandwidth savings cost me?', 'wps3'); ?></h3>
+                                <p><?php _e('S3 typically costs $0.09/GB for bandwidth, compared to $0.12-0.40/GB for most hosting providers. Plus, S3 reduces server load significantly.', 'wps3'); ?></p>
+                            </div>
+                            
+                            <div class="wps3-faq-item">
+                                <h3><?php _e('Connection test fails - what should I check?', 'wps3'); ?></h3>
+                                <p><?php _e('Common issues: (1) Incorrect access/secret keys, (2) Wrong bucket region, (3) Bucket permissions not set to allow your keys, (4) Endpoint URL typo.', 'wps3'); ?></p>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -660,6 +712,8 @@ class WPS3_Settings {
             }
         }
         </style>
+        
+        <?php echo $this->get_additional_styles(); ?>
         <?php
     }
 
@@ -823,19 +877,395 @@ class WPS3_Settings {
                 field.addClass('wps3-field-error');
                 field.after('<div class=\"wps3-field-error\" style=\"color: #dc3545; font-size: 13px; margin-top: 5px;\">' + message + '</div>');
             }
+            
+            // Connection Test Button Handler
+            $('#wps3-test-connection-btn').on('click', function(e) {
+                e.preventDefault();
+                var btn = $(this);
+                var originalHtml = btn.html();
+                
+                btn.prop('disabled', true).html('<span class=\"spinner is-active\" style=\"float:none; margin:0 5px 0 0;\"></span> Testing...');
+                $('#wps3-connection-result').hide();
+                
+                $.ajax({
+                    url: ajaxurl,
+                    method: 'POST',
+                    data: {
+                        action: 'wps3_test_connection',
+                        nonce: '" . esc_js(wp_create_nonce('wps3_test_connection')) . "',
+                        bucket_name: $('input[name=\"wps3_bucket_name\"]').val(),
+                        endpoint_url: $('input[name=\"wps3_s3_endpoint_url\"]').val(),
+                        region: $('input[name=\"wps3_s3_region\"]').val(),
+                        access_key: $('input[name=\"wps3_access_key\"]').val(),
+                        secret_key: $('input[name=\"wps3_secret_key\"]').val()
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            $('#wps3-connection-result')
+                                .removeClass('notice-error')
+                                .addClass('notice notice-success')
+                                .html('<p><strong>✅ ' + response.data.message + '</strong></p>')
+                                .slideDown();
+                        } else {
+                            $('#wps3-connection-result')
+                                .removeClass('notice-success')
+                                .addClass('notice notice-error')
+                                .html('<p><strong>❌ ' + (response.data.message || 'Connection failed') + '</strong></p>')
+                                .slideDown();
+                        }
+                    },
+                    error: function(xhr) {
+                        $('#wps3-connection-result')
+                            .removeClass('notice-success')
+                            .addClass('notice notice-error')
+                            .html('<p><strong>❌ Connection test failed. Please check your settings.</strong></p>')
+                            .slideDown();
+                    },
+                    complete: function() {
+                        btn.prop('disabled', false).html(originalHtml);
+                    }
+                });
+            });
+            
+            
+            // Load S3 Storage Usage
+            function loadStorageUsage() {
+                var storageElement = $('#wps3-storage-usage');
+                if (storageElement.length && '" . esc_js(get_option('wps3_enabled')) . "' === '1') {
+                    $.ajax({
+                        url: ajaxurl,
+                        method: 'POST',
+                        data: {
+                            action: 'wps3_get_storage_usage',
+                            nonce: '" . esc_js(wp_create_nonce('wps3_nonce')) . "'
+                        },
+                        success: function(response) {
+                            if (response.success && response.data) {
+                                var estimated = response.data.estimated ? ' (estimated)' : '';
+                                storageElement.html(response.data.total_size_formatted + estimated);
+                            } else {
+                                storageElement.html('" . esc_js(__('Unable to load', 'wps3')) . "');
+                            }
+                        },
+                        error: function() {
+                            storageElement.html('" . esc_js(__('Error loading', 'wps3')) . "');
+                        }
+                    });
+                }
+            }
+            
+            // Load storage usage on page load
+            loadStorageUsage();
+            
+            // FAQ Modal Handlers
+            $('#wps3-show-faq').on('click', function(e) {
+                e.preventDefault();
+                $('#wps3-faq-overlay').fadeIn(200);
+            });
+            
+            $('#wps3-close-faq, #wps3-faq-overlay').on('click', function(e) {
+                if (e.target === this) {
+                    $('#wps3-faq-overlay').fadeOut(200);
+                }
+            });
 
         })(jQuery);
         ";
     }
-
-    // Template for secure custom admin actions (for future use):
-    /*
-    public function handle_custom_action() {
-        if (!current_user_can('manage_options')) {
-            wp_die(__('You do not have permission to perform this action.', 'wps3'));
+    
+    /**
+     * Get additional CSS for new UI elements
+     */
+    private function get_additional_styles() {
+        return "
+        <style>
+        .wps3-help-section h4 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #23282d;
         }
-        check_admin_referer('wps3_custom_action'); // Nonce check
-        // ... handle action ...
+        
+        .wps3-sample-url code {
+            display: block;
+            background: #f5f5f5;
+            padding: 8px 12px;
+            border-left: 3px solid #0073aa;
+            font-size: 13px;
+            color: #333;
+        }
+        
+        .wps3-help-links {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .wps3-help-links li {
+            margin-bottom: 8px;
+        }
+        
+        .wps3-help-links a {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            color: #0073aa;
+            padding: 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        
+        .wps3-help-links a:hover {
+            background: #f0f0f0;
+        }
+        
+        #wps3-faq-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 100000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .wps3-faq-modal {
+            background: white;
+            padding: 0;
+            border-radius: 8px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 80vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .wps3-faq-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid #e1e1e1;
+            background: #f8f9fa;
+        }
+        
+        .wps3-faq-header h2 {
+            margin: 0;
+            font-size: 20px;
+        }
+        
+        .wps3-faq-header button {
+            font-size: 24px;
+            line-height: 1;
+            padding: 0 10px;
+        }
+        
+        .wps3-faq-content {
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        .wps3-faq-item {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e1e1e1;
+        }
+        
+        .wps3-faq-item:last-child {
+            border-bottom: none;
+        }
+        
+.wps3-faq-item h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            color: #0073aa;
+        }
+        
+        .wps3-faq-item p {
+            margin: 0;
+            color: #666;
+            line-height: 1.6;
+        }
+        
+        #wps3-connection-result {
+            padding: 10px;
+            border-radius: 4px;
+        }
+        
+        @media (max-width: 768px) {
+            .wps3-faq-modal {
+                width: 95%;
+                max-height: 90vh;
+            }
+        }
+        </style>
+        ";
     }
-    */
+
+    /**
+     * AJAX handler for testing S3 connection.
+     * Implements proper nonce verification and capability checks.
+     */
+    public function ajax_test_connection() {
+        // Security checks
+        check_ajax_referer('wps3_test_connection', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => __('You do not have permission to perform this action.', 'wps3')], 403);
+        }
+        
+        // Sanitize and validate input
+        $bucket_name = isset($_POST['bucket_name']) ? sanitize_text_field($_POST['bucket_name']) : '';
+        $endpoint_url = isset($_POST['endpoint_url']) ? esc_url_raw($_POST['endpoint_url']) : '';
+        $region = isset($_POST['region']) ? sanitize_text_field($_POST['region']) : '';
+        $access_key = isset($_POST['access_key']) ? sanitize_text_field($_POST['access_key']) : '';
+        $secret_key = isset($_POST['secret_key']) ? sanitize_text_field($_POST['secret_key']) : '';
+        
+        // Validate required fields
+        if (empty($bucket_name) || empty($endpoint_url) || empty($region) || empty($access_key) || empty($secret_key)) {
+            wp_send_json_error(['message' => __('All fields are required for connection testing.', 'wps3')], 400);
+        }
+        
+        // Validate bucket name format
+        if (!preg_match('/^[a-z0-9.-]+$/', $bucket_name)) {
+            wp_send_json_error(['message' => __('Invalid bucket name format. Use only lowercase letters, numbers, hyphens, and periods.', 'wps3')], 400);
+        }
+        
+        // Validate endpoint URL
+        if (!filter_var($endpoint_url, FILTER_VALIDATE_URL)) {
+            wp_send_json_error(['message' => __('Invalid endpoint URL format.', 'wps3')], 400);
+        }
+        
+        try {
+            // Create temporary S3 client for testing
+            require_once WPS3_PLUGIN_DIR . 'vendor/autoload.php';
+            
+            $config = [
+                'version'     => 'latest',
+                'region'      => $region,
+                'endpoint'    => $endpoint_url,
+                'credentials' => [
+                    'key'    => $access_key,
+                    'secret' => $secret_key,
+                ],
+                'use_path_style_endpoint' => true,
+                'http' => [
+                    'timeout' => 10,
+                    'connect_timeout' => 5,
+                ],
+            ];
+            
+            $s3_client = new \Aws\S3\S3Client($config);
+            
+            // Test connection by checking if bucket exists
+            $result = $s3_client->headBucket([
+                'Bucket' => $bucket_name,
+            ]);
+            
+            wp_send_json_success([
+                'message' => __('Connection successful! Bucket is accessible.', 'wps3'),
+                'bucket_region' => $result->get('@metadata')['headers']['x-amz-bucket-region'] ?? $region,
+            ]);
+            
+        } catch (\Aws\S3\Exception\S3Exception $e) {
+            $error_code = $e->getAwsErrorCode();
+            $error_message = $e->getAwsErrorMessage();
+            
+            // Provide specific error messages
+            if ($error_code === 'NoSuchBucket') {
+                wp_send_json_error(['message' => __('Bucket does not exist. Please check the bucket name.', 'wps3')], 404);
+            } elseif ($error_code === 'InvalidAccessKeyId') {
+                wp_send_json_error(['message' => __('Invalid access key. Please check your credentials.', 'wps3')], 401);
+            } elseif ($error_code === 'SignatureDoesNotMatch') {
+                wp_send_json_error(['message' => __('Invalid secret key. Please check your credentials.', 'wps3')], 401);
+            } elseif ($error_code === 'AccessDenied') {
+                wp_send_json_error(['message' => __('Access denied. Check bucket permissions and credentials.', 'wps3')], 403);
+            } else {
+                wp_send_json_error(['message' => sprintf(__('S3 Error: %s', 'wps3'), $error_message)], 500);
+            }
+            
+        } catch (\Exception $e) {
+            wp_send_json_error(['message' => sprintf(__('Connection failed: %s', 'wps3'), $e->getMessage())], 500);
+        }
+    }
+    
+    /**
+     * AJAX handler for getting S3 storage usage.
+     * Implements proper nonce verification and capability checks.
+     */
+    public function ajax_get_storage_usage() {
+        // Security checks
+        check_ajax_referer('wps3_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => __('You do not have permission to perform this action.', 'wps3')], 403);
+        }
+        
+        // Check if S3 is configured
+        if (!get_option('wps3_enabled') || empty(get_option('wps3_bucket_name'))) {
+            wp_send_json_error(['message' => __('S3 is not configured.', 'wps3')], 400);
+        }
+        
+        try {
+            $wps3 = WPS3::get_instance();
+            $s3_client_wrapper = $wps3->get_s3_client_wrapper();
+            $s3_client = $s3_client_wrapper->get_s3_client();
+            
+            if (!$s3_client) {
+                wp_send_json_error(['message' => __('S3 client not initialized.', 'wps3')], 500);
+            }
+            
+            $bucket_name = $s3_client_wrapper->get_bucket_name();
+            $bucket_folder = $s3_client_wrapper->get_bucket_folder();
+            
+            // Get list of objects to calculate usage
+            $prefix = !empty($bucket_folder) ? trailingslashit($bucket_folder) : '';
+            
+            $total_size = 0;
+            $total_objects = 0;
+            $continuation_token = null;
+            
+            do {
+                $params = [
+                    'Bucket' => $bucket_name,
+                    'Prefix' => $prefix,
+                ];
+                
+                if ($continuation_token) {
+                    $params['ContinuationToken'] = $continuation_token;
+                }
+                
+                $result = $s3_client->listObjectsV2($params);
+                
+                if (isset($result['Contents'])) {
+                    foreach ($result['Contents'] as $object) {
+                        $total_size += $object['Size'];
+                        $total_objects++;
+                    }
+                }
+                
+                $continuation_token = $result['IsTruncated'] ? $result['NextContinuationToken'] : null;
+                
+                // Limit to prevent timeout (max 1000 objects for initial load)
+                if ($total_objects >= 1000) {
+                    break;
+                }
+                
+            } while ($continuation_token);
+            
+            wp_send_json_success([
+                'total_size' => $total_size,
+                'total_size_formatted' => size_format($total_size, 2),
+                'total_objects' => $total_objects,
+                'estimated' => $total_objects >= 1000,
+            ]);
+            
+        } catch (\Exception $e) {
+            wp_send_json_error(['message' => sprintf(__('Failed to get storage usage: %s', 'wps3'), $e->getMessage())], 500);
+        }
+    }
 }

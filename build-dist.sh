@@ -91,13 +91,20 @@ rm -f SIMPLIFIED_*.md
 # Remove empty files
 find . -type f -empty -delete
 
-# Install production dependencies only
+    # Install production dependencies only
 echo -e "${YELLOW}Installing production dependencies...${NC}"
 if [ -f "composer.json" ]; then
+    # Use --no-dev to exclude development dependencies
+    # Use --classmap-authoritative to generate optimized autoloader (this creates manifest.json)
     composer install --no-dev --optimize-autoloader --classmap-authoritative --no-interaction
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Composer install failed!${NC}"
+        exit 1
+    fi
 fi
 
-# Clean up vendor directory
+# Clean up vendor directory - remove documentation but keep all code
 echo -e "${YELLOW}Cleaning up vendor directory...${NC}"
 if [ -d "vendor/" ]; then
     # Remove test directories
@@ -105,24 +112,25 @@ if [ -d "vendor/" ]; then
     find vendor/ -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
     find vendor/ -type d -name "Test" -exec rm -rf {} + 2>/dev/null || true
     find vendor/ -type d -name "Tests" -exec rm -rf {} + 2>/dev/null || true
-    
+
     # Remove doc directories
     find vendor/ -type d -name "doc" -exec rm -rf {} + 2>/dev/null || true
     find vendor/ -type d -name "docs" -exec rm -rf {} + 2>/dev/null || true
     find vendor/ -type d -name "documentation" -exec rm -rf {} + 2>/dev/null || true
-    
+
     # Remove example directories
     find vendor/ -type d -name "example" -exec rm -rf {} + 2>/dev/null || true
     find vendor/ -type d -name "examples" -exec rm -rf {} + 2>/dev/null || true
     find vendor/ -type d -name "sample" -exec rm -rf {} + 2>/dev/null || true
     find vendor/ -type d -name "samples" -exec rm -rf {} + 2>/dev/null || true
-    
+
     # Remove development files
-    find vendor/ -name "*.md" -not -path "*/aws/*" -delete 2>/dev/null || true
-    find vendor/ -name "*.txt" -not -path "*/aws/*" -delete 2>/dev/null || true
+    find vendor/ -name "*.md" -delete 2>/dev/null || true
+    find vendor/ -name "README*" -delete 2>/dev/null || true
+    find vendor/ -name "CHANGELOG*" -delete 2>/dev/null || true
     find vendor/ -name ".gitignore" -delete 2>/dev/null || true
     find vendor/ -name ".gitattributes" -delete 2>/dev/null || true
-    find vendor/ -name "composer.json" -not -path "*/composer/*" -delete 2>/dev/null || true
+    find vendor/ -name "composer.json" -delete 2>/dev/null || true
     find vendor/ -name "composer.lock" -delete 2>/dev/null || true
     find vendor/ -name "phpunit.xml*" -delete 2>/dev/null || true
     find vendor/ -name "phpcs.xml*" -delete 2>/dev/null || true
@@ -131,9 +139,11 @@ if [ -d "vendor/" ]; then
     find vendor/ -name ".scrutinizer.yml" -delete 2>/dev/null || true
     find vendor/ -name ".travis.yml" -delete 2>/dev/null || true
     find vendor/ -name ".github" -type d -exec rm -rf {} + 2>/dev/null || true
-    
+
     # Remove empty directories
     find vendor/ -type d -empty -delete 2>/dev/null || true
+    
+    echo -e "${GREEN}✓ Vendor cleanup complete${NC}"
 fi
 
 # Update version in readme.txt to match plugin file
@@ -183,9 +193,16 @@ find . -name "*.php" -exec php -l {} \; | grep -v "No syntax errors detected" &&
     exit 1
 } || true
 
-# Calculate final size
+# Calculate final size and show optimization results
 FINAL_SIZE=$(du -sh . | cut -f1)
 echo -e "${GREEN}Build directory size: ${FINAL_SIZE}${NC}"
+
+# Show size breakdown
+echo -e "${YELLOW}Size breakdown:${NC}"
+echo -e "  Main plugin files: $(du -sh wps3.php includes/ | cut -f1)"
+echo -e "  Vendor files: $(du -sh vendor/ | cut -f1)"
+echo -e "  Assets: $(du -sh assets/ | cut -f1)"
+echo -e "  Other files: $(du -sh *.txt *.md | cut -f1)"
 
 # Create ZIP file
 echo -e "${YELLOW}Creating ZIP file...${NC}"

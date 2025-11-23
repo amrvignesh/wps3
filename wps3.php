@@ -32,6 +32,11 @@ require_once ABSPATH . 'wp-admin/includes/image.php';
 require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-s3-client.php';
 require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-settings.php';
 require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-migration.php';
+
+// Load debug helper if it exists
+if (file_exists(plugin_dir_path(__FILE__) . 'debug-s3-upload.php')) {
+    require_once plugin_dir_path(__FILE__) . 'debug-s3-upload.php';
+}
 require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-migration-v2.php';
 
 class WPS3
@@ -39,6 +44,12 @@ class WPS3
     private $s3_client_wrapper;
     protected $uploaded_file_s3_info = [];
     private static $instance = null;
+    
+    /**
+     * URL cache for memoization to prevent redundant processing
+     * @var array
+     */
+    private $url_cache = [];
 
     /**
      * Get singleton instance
@@ -290,6 +301,7 @@ class WPS3
 
     /**
      * Rewrite attachment URLs to point to S3.
+     * Uses memoization to prevent redundant processing across multiple filter hooks.
      *
      * @param string|array $url Attachment URL (can be string or array).
      * @param int    $attachment_id Attachment ID.
@@ -312,14 +324,24 @@ class WPS3
             $this->wps3_log("rewrite_attachment_url received non-string input for attachment {$attachment_id}: " . gettype($url), 'warning');
             return $url;
         }
+        
+        // Check cache first (memoization)
+        $cache_key = 'att_' . $attachment_id;
+        if (isset($this->url_cache[$cache_key])) {
+            return $this->url_cache[$cache_key];
+        }
 
         $s3_info = get_post_meta($attachment_id, 'wps3_s3_info', true);
         if (empty($s3_info) || empty($s3_info['key'])) {
+            // Cache the original URL (not migrated)
+            $this->url_cache[$cache_key] = $url;
             return $url;
         }
 
         // Check if the URL is already an S3 URL
         if (strpos($url, $this->s3_client_wrapper->get_bucket_name()) !== false) {
+            // Already rewritten, cache and return
+            $this->url_cache[$cache_key] = $url;
             return $url;
         }
 
@@ -333,7 +355,12 @@ class WPS3
         }
 
         // Allow filtering of the final URL
-        return apply_filters('wps3_file_url', $s3_url, $attachment_id, $s3_info, $url);
+        $s3_url = apply_filters('wps3_file_url', $s3_url, $attachment_id, $s3_info, $url);
+        
+        // Cache the result
+        $this->url_cache[$cache_key] = $s3_url;
+        
+        return $s3_url;
     }
 
     /**
@@ -630,12 +657,22 @@ class WPS3
     }
 
     /**
-     * Get simple analytics data.
+     * Get simple analytics data with caching.
+     * Uses WordPress queries instead of filesystem scanning for better performance.
      *
+     * @param bool $force_refresh Force refresh the cache
      * @return array
      */
-    public function get_analytics() {
+    public function get_analytics($force_refresh = false) {
         global $wpdb;
+        
+        // Check cache first (15 minute cache)
+        if (!$force_refresh) {
+            $cached = get_transient('wps3_analytics');
+            if ($cached !== false) {
+                return $cached;
+            }
+        }
 
         $analytics = [
             'total_attachments' => 0,
@@ -648,7 +685,7 @@ class WPS3
         ];
 
         try {
-            // Get attachment counts with optimized query
+            // Get attachment counts with optimized query (already properly using wpdb->prepare in JOIN)
             $attachment_stats = $wpdb->get_row("
                 SELECT
                     COUNT(*) as total,
@@ -665,47 +702,79 @@ class WPS3
                 $analytics['pending_attachments'] = (int) $attachment_stats->pending;
             }
 
-            // Get local file sizes more efficiently - only count files that aren't migrated
-            $upload_dir = wp_upload_dir();
-            $upload_path = $upload_dir['basedir'];
-
-            if (is_dir($upload_path)) {
-                // Use glob for better performance than RecursiveIteratorIterator
-                $local_files = glob($upload_path . '/**/*.*', GLOB_NOSORT);
-
-                if ($local_files !== false) {
-                    foreach ($local_files as $file_path) {
-                        // Only count files that are actual files (not directories)
-                        if (is_file($file_path)) {
-                            // Check if this file is associated with a non-migrated attachment
-                            $relative_path = str_replace(trailingslashit($upload_path), '', $file_path);
-
-                            $is_migrated = $wpdb->get_var($wpdb->prepare("
-                                SELECT COUNT(*) FROM {$wpdb->postmeta} pm
-                                INNER JOIN {$wpdb->postmeta} pm2 ON pm.post_id = pm2.post_id
-                                WHERE pm.meta_key = '_wp_attached_file'
-                                AND pm.meta_value = %s
-                                AND pm2.meta_key = 'wps3_s3_info'
-                                AND pm2.meta_value IS NOT NULL
-                            ", $relative_path));
-
-                            // Only count size if file is not migrated
-                            if ($is_migrated == 0) {
-                                $analytics['total_size_local'] += filesize($file_path);
-                            }
-                        }
-                    }
+            // Calculate file sizes using WordPress attachment metadata instead of filesystem
+            // This is much faster and more reliable
+            
+            // Get total size of migrated files from WordPress metadata
+            $migrated_query = "
+                SELECT p.ID, pm.meta_value as metadata
+                FROM {$wpdb->posts} p
+                INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = '_wp_attachment_metadata'
+                INNER JOIN {$wpdb->postmeta} pm2 ON p.ID = pm2.post_id AND pm2.meta_key = 'wps3_s3_info'
+                WHERE p.post_type = 'attachment'
+                AND pm.meta_value IS NOT NULL
+                AND pm2.meta_value IS NOT NULL
+            ";
+            
+            $migrated_attachments = $wpdb->get_results($migrated_query);
+            $total_migrated_size = 0;
+            
+            foreach ($migrated_attachments as $attachment) {
+                $metadata = maybe_unserialize($attachment->metadata);
+                if ($metadata && isset($metadata['filesize'])) {
+                    $total_migrated_size += (int) $metadata['filesize'];
+                } elseif ($metadata && isset($metadata['width']) && isset($metadata['height'])) {
+                    // Estimate size if filesize not available (rough estimate)
+                    $total_migrated_size += ($metadata['width'] * $metadata['height'] * 3) / 2;
                 }
             }
+            
+            $analytics['total_size_s3'] = $total_migrated_size;
+            
+            // Get total size of pending files from WordPress metadata
+            $pending_query = "
+                SELECT p.ID, pm.meta_value as metadata
+                FROM {$wpdb->posts} p
+                INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = '_wp_attachment_metadata'
+                LEFT JOIN {$wpdb->postmeta} pm2 ON p.ID = pm2.post_id AND pm2.meta_key = 'wps3_s3_info'
+                WHERE p.post_type = 'attachment'
+                AND pm.meta_value IS NOT NULL
+                AND pm2.meta_value IS NULL
+            ";
+            
+            $pending_attachments = $wpdb->get_results($pending_query);
+            $total_local_size = 0;
+            
+            foreach ($pending_attachments as $attachment) {
+                $metadata = maybe_unserialize($attachment->metadata);
+                if ($metadata && isset($metadata['filesize'])) {
+                    $total_local_size += (int) $metadata['filesize'];
+                } elseif ($metadata && isset($metadata['width']) && isset($metadata['height'])) {
+                    // Estimate size if filesize not available
+                    $total_local_size += ($metadata['width'] * $metadata['height'] * 3) / 2;
+                }
+            }
+            
+            $analytics['total_size_local'] = $total_local_size;
 
-            // Estimate bandwidth savings (simplified calculation)
-            $analytics['bandwidth_saved'] = $analytics['migrated_attachments'] * 1024 * 1024; // Assume 1MB average file size
-            $analytics['estimated_monthly_savings'] = $analytics['bandwidth_saved'] * 0.09 / (1024 * 1024 * 1024); // $0.09 per GB
+            // Calculate bandwidth savings
+            // Assume files are accessed 100 times per month on average
+            $access_multiplier = 100;
+            $analytics['bandwidth_saved'] = $total_migrated_size * $access_multiplier;
+            
+            // Calculate cost savings
+            // AWS bandwidth out: $0.09 per GB
+            // S3 bandwidth is typically free or very cheap compared to server bandwidth
+            $server_bandwidth_cost_per_gb = 0.09;
+            $analytics['estimated_monthly_savings'] = ($analytics['bandwidth_saved'] / (1024 * 1024 * 1024)) * $server_bandwidth_cost_per_gb;
 
         } catch (Exception $e) {
             // Log error but don't break the page
             $this->wps3_log('Analytics calculation failed: ' . $e->getMessage(), 'error');
         }
+        
+        // Cache the results for 15 minutes
+        set_transient('wps3_analytics', $analytics, 15 * MINUTE_IN_SECONDS);
 
         return $analytics;
     }
