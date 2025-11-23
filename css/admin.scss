@@ -292,4 +292,196 @@ $border-color: #c3c4c7;
         font-weight: 600;
         color: $text-color;
     }
+}
+
+// Current File Indicator
+.wps3-current-file {
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #f0f6fc 0%, #e8f4f8 100%);
+    border-left: 4px solid $primary-color;
+    border-radius: 4px;
+    margin-top: 15px;
+    font-size: 14px;
+    @include transition();
+
+    .wps3-file-label {
+        color: #666;
+        margin-right: 8px;
+    }
+
+    .wps3-file-name {
+        font-weight: 600;
+        color: $primary-color;
+        font-family: monospace;
+    }
+}
+
+// Failed Files Section
+.wps3-failed-section {
+    border-left: 4px solid $error-color;
+    background: #fff8f8;
+}
+
+.wps3-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    margin-left: 8px;
+    
+    &.wps3-badge-error {
+        background: $error-color;
+        color: $white;
+        animation: pulse 2s ease-in-out infinite;
+    }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.wps3-failed-actions {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.wps3-failed-list {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 4px;
+}
+
+.wps3-failed-item {
+    padding: 14px;
+    background: $white;
+    border-left: 3px solid $error-color;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    @include transition();
+    @include box-shadow(0 2px 4px rgba(0,0,0,0.05));
+    
+    &:hover {
+        background: #fff5f5;
+        @include box-shadow(0 4px 8px rgba(0,0,0,0.1));
+        transform: translateX(2px);
+    }
+}
+
+.wps3-failed-file-name {
+    font-weight: 600;
+    color: $text-color;
+    margin-bottom: 6px;
+    font-family: monospace;
+    font-size: 13px;
+}
+
+.wps3-failed-error {
+    color: $error-color;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.wps3-btn-small {
+    padding: 6px 12px;
+    font-size: 12px;
+    min-width: auto;
+    height: auto;
+}
+
+// Bandwidth Savings Card
+.wps3-savings-card {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border-left: 4px solid $success-color;
+}
+
+.wps3-savings-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-bottom: 16px;
+}
+
+.wps3-saving-item {
+    text-align: center;
+    padding: 24px 16px;
+    background: $white;
+    border-radius: 12px;
+    border: 2px solid $success-color;
+    @include transition();
+    @include box-shadow(0 2px 8px rgba(0,163,42,0.1));
+
+    &:hover {
+        transform: translateY(-4px);
+        @include box-shadow(0 8px 16px rgba(0,163,42,0.2));
+    }
+}
+
+.wps3-saving-value {
+    display: block;
+    font-size: 32px;
+    font-weight: 700;
+    color: $success-color;
+    margin-bottom: 8px;
+    line-height: 1.2;
+    font-feature-settings: 'tnum';
+}
+
+.wps3-saving-label {
+    display: block;
+    font-size: 13px;
+    color: #666;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.wps3-savings-note {
+    text-align: center;
+    padding: 12px 16px;
+    background: rgba(0,163,42,0.1);
+    border-radius: 6px;
+    color: #555;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+// Responsive Design
+@media (max-width: 768px) {
+    .wps3-savings-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .wps3-saving-item {
+        padding: 16px 12px;
+    }
+
+    .wps3-saving-value {
+        font-size: 24px;
+    }
+
+    .wps3-failed-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .wps3-btn-small {
+        width: 100%;
+    }
+
+    .wps3-failed-actions {
+        flex-direction: column;
+        
+        button {
+            width: 100%;
+        }
+    }
 } 
