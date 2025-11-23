@@ -1,0 +1,231 @@
+// WPS3 WordPress-Native Admin Styles
+// Minimal custom CSS - mostly relies on WordPress core styles
+
+// WordPress Progress Bar
+.wps3-wp-progress-wrapper {
+    margin-bottom: 20px;
+}
+
+.wps3-progress-label {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+.wps3-progress-count {
+    color: #646970;
+    font-weight: 400;
+}
+
+.wps3-wp-progress-bar {
+    width: 100%;
+    height: 24px;
+    background: #f0f0f1;
+    border-radius: 3px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.wps3-wp-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #2271b1, #135e96);
+    transition: width 0.5s ease;
+    min-width: 0;
+}
+
+// Button Group
+.wps3-button-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 15px;
+
+    .button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+
+        .dashicons {
+            font-size: 16px;
+            width: 16px;
+            height: 16px;
+        }
+    }
+}
+
+// Status Badge
+.wps3-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 15px 0;
+    font-size: 14px;
+}
+
+// Stats Sidebar
+.wps3-stats-sidebar {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+
+    li {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid #f0f0f1;
+
+        &:last-child {
+            border-bottom: none;
+        }
+
+        .dashicons {
+            font-size: 24px;
+            width: 24px;
+            height: 24px;
+            color: #2271b1;
+            flex-shrink: 0;
+        }
+
+        div {
+            flex: 1;
+        }
+
+        strong {
+            display: block;
+            font-size: 18px;
+            font-weight: 600;
+            color: #1d2327;
+            margin-bottom: 2px;
+        }
+
+        small {
+            font-size: 12px;
+            color: #646970;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+    }
+}
+
+// Count Badge
+.wps3-count-badge {
+    display: inline-block;
+    background: #d63638;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 6px;
+}
+
+// Control Section
+.wps3-control-section {
+    padding: 4px 0;
+}
+
+// WordPress Postbox Enhancements
+#poststuff {
+    .postbox {
+        .hndle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+
+            .dashicons {
+                font-size: 18px;
+                width: 18px;
+                height: 18px;
+            }
+        }
+
+        .inside {
+            margin: 0;
+            padding: 12px;
+        }
+    }
+}
+
+// Two-column layout fixes
+#post-body-content {
+    margin-right: 300px;
+}
+
+#postbox-container-1 {
+    float: right;
+    width: 280px;
+}
+
+// WordPress responsive
+@media only screen and (max-width: 850px) {
+    #post-body-content {
+        margin-right: 0;
+    }
+
+    #postbox-container-1 {
+        float: none;
+        width: 100%;
+        margin-top: 20px;
+    }
+
+    .wps3-button-group {
+        flex-direction: column;
+
+        .button {
+            width: 100%;
+            justify-content: center;
+        }
+    }
+}
+
+// Remove old custom styles - use WordPress defaults
+.wps3-migration-card,
+.wps3-card-header,
+.wps3-card-content,
+.wps3-quick-stats,
+.wps3-stat,
+.wps3-stat-number,
+.wps3-stat-label,
+.wps3-control-buttons,
+.wps3-btn,
+.wps3-btn-primary,
+.wps3-btn-secondary,
+.wps3-btn-danger,
+.wps3-btn-small,
+.wps3-progress-container,
+.wps3-progress-header,
+.wps3-progress-title,
+.wps3-progress-percentage,
+.wps3-progress-bar-wrapper,
+.wps3-progress-bar,
+.wps3-progress-fill,
+.wps3-progress-stats,
+.wps3-progress-stat,
+.wps3-stat-value,
+.wps3-features-grid,
+.wps3-feature,
+.wps3-error-container,
+.wps3-error-message,
+.wps3-failed-section,
+.wps3-badge,
+.wps3-badge-error,
+.wps3-failed-actions,
+.wps3-failed-list,
+.wps3-failed-item,
+.wps3-failed-file-name,
+.wps3-failed-error,
+.wps3-savings-card,
+.wps3-savings-grid,
+.wps3-saving-item,
+.wps3-saving-value,
+.wps3-saving-label,
+.wps3-savings-note,
+.wps3-current-file,
+.wps3-file-label,
+.wps3-file-name {
+    // Legacy styles removed - using WordPress defaults
+}

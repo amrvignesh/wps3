@@ -47,6 +47,7 @@ The plugin supports any service that is compatible with the S3 API, including:
 * MinIO
 * Backblaze B2
 * Wasabi
+* Telnyx
 * And more...
 
 = Do I need to keep local files? =

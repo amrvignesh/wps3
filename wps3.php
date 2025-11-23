@@ -3,7 +3,7 @@
 Plugin Name: WPS3
 Plugin URI: https://github.com/amrvignesh/wps3
 Description: Offload WordPress uploads directory to S3 compatible storage
-Version: 0.3
+Version: 0.4
 Requires at least: 5.0
 Requires PHP: 7.0
 Author: Vignesh AMR
@@ -20,12 +20,12 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('WPS3_VERSION', '0.3');
+define('WPS3_VERSION', '0.4');
 define('WPS3_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WPS3_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WPS3_PLUGIN_FILE', __FILE__);
 
-require_once 'vendor/aws/aws-autoloader.php';
+require_once 'vendor/autoload.php';
 require_once ABSPATH . 'wp-admin/includes/plugin.php';
 require_once ABSPATH . 'wp-admin/includes/file.php';
 require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -33,10 +33,33 @@ require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-s3-client.php';
 require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-settings.php';
 require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-migration.php';
 
+// Load debug helper if it exists
+if (file_exists(plugin_dir_path(__FILE__) . 'debug-s3-upload.php')) {
+    require_once plugin_dir_path(__FILE__) . 'debug-s3-upload.php';
+}
+require_once WPS3_PLUGIN_DIR . 'includes/class-wps3-migration-v2.php';
+
 class WPS3
 {
     private $s3_client_wrapper;
     protected $uploaded_file_s3_info = [];
+    private static $instance = null;
+    
+    /**
+     * URL cache for memoization to prevent redundant processing
+     * @var array
+     */
+    private $url_cache = [];
+
+    /**
+     * Get singleton instance
+     */
+    public static function get_instance() {
+        if (self::$instance === null) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
 
     /**
      * WPS3 constructor.
@@ -45,7 +68,8 @@ class WPS3
     {
         $this->s3_client_wrapper = new WPS3_S3_Client();
         new WPS3_Settings();
-        new WPS3_Migration($this->s3_client_wrapper);
+        // Use the new v2 migration with live control panel
+        new WPS3_Migration_V2($this->s3_client_wrapper);
 
         add_action('wp_loaded', [$this, 'init']);
         add_action('add_attachment', [$this, 'upload_attachment']);
@@ -106,9 +130,12 @@ class WPS3
         $source_file_path = $file_data['file'];
         $upload_dir_info = wp_upload_dir();
         $relative_path = str_replace(trailingslashit($upload_dir_info['basedir']), '', $source_file_path);
-        $unique_filename = basename($source_file_path);
+        
+        // CRITICAL: Use the full relative path as the unique identifier, not just the filename
+        // This ensures that WordPress's file renaming (fresh.gif -> fresh-1.gif -> fresh-2.gif) is respected
+        $unique_identifier = $relative_path;
 
-        // Construct the S3 object key
+        // Construct the S3 object key using the full relative path
         $key_parts = [];
         if (!empty($this->s3_client_wrapper->get_bucket_folder())) {
             $key_parts[] = trim($this->s3_client_wrapper->get_bucket_folder(), '/');
@@ -137,14 +164,15 @@ class WPS3
             // Update the file info with S3 data
             $file_data['url'] = $s3_url;
             
-            // Store S3 info temporarily for upload_attachment to pick up
-            $this->uploaded_file_s3_info[$unique_filename] = [
+            // Store S3 info temporarily using the full relative path as key
+            // This ensures each renamed file gets its own unique S3 entry
+            $this->uploaded_file_s3_info[$unique_identifier] = [
                 'bucket' => $this->s3_client_wrapper->get_bucket_name(),
                 'key'    => $s3_object_key,
                 'url'    => $s3_url,
             ];
             
-            $this->wps3_log("Successfully uploaded main file to S3: $source_file_path -> $s3_object_key", 'info');
+            $this->wps3_log("Successfully uploaded main file to S3: $source_file_path -> $s3_object_key (identifier: $unique_identifier)", 'info');
             
             // Fire action after successful upload
             do_action('wps3_after_upload', $source_file_path, $s3_object_key, $s3_url, $file_data);
@@ -202,16 +230,19 @@ class WPS3
             return;
         }
         
-        // Get the filename that WordPress has saved
+        // Get the filename that WordPress has saved (this includes any renaming WordPress did)
         $attached_file_path_relative = get_post_meta($attachment_id, '_wp_attached_file', true);
         if (empty($attached_file_path_relative)) {
             return;
         }
-        $unique_filename = basename($attached_file_path_relative);
+        
+        // CRITICAL: Use the full relative path as the unique identifier, not just the filename
+        // This matches what we used in upload_overrides()
+        $unique_identifier = $attached_file_path_relative;
 
-        // Check if we have temporary S3 info for this filename
-        if (isset($this->uploaded_file_s3_info[$unique_filename])) {
-            $s3_info = $this->uploaded_file_s3_info[$unique_filename];
+        // Check if we have temporary S3 info for this unique identifier
+        if (isset($this->uploaded_file_s3_info[$unique_identifier])) {
+            $s3_info = $this->uploaded_file_s3_info[$unique_identifier];
             
             // Save the S3 info as permanent post meta. This is the official tracking record.
             update_post_meta($attachment_id, 'wps3_s3_info', $s3_info);
@@ -260,20 +291,21 @@ class WPS3
             }
             
             // Clean up the temporary storage
-            unset($this->uploaded_file_s3_info[$unique_filename]);
+            unset($this->uploaded_file_s3_info[$unique_identifier]);
             
             $this->wps3_log("Successfully processed attachment ID: $attachment_id with S3 info: " . print_r($s3_info, true), 'info');
         } else {
-            $this->wps3_log("No temporary S3 info found for attachment ID: $attachment_id, filename: $unique_filename", 'warning');
+            $this->wps3_log("No temporary S3 info found for attachment ID: $attachment_id, identifier: $unique_identifier. Available identifiers: " . implode(', ', array_keys($this->uploaded_file_s3_info)), 'warning');
         }
     }
 
     /**
      * Rewrite attachment URLs to point to S3.
+     * Uses memoization to prevent redundant processing across multiple filter hooks.
      *
-     * @param string $url Attachment URL.
+     * @param string|array $url Attachment URL (can be string or array).
      * @param int    $attachment_id Attachment ID.
-     * @return string
+     * @return string|array
      */
     public function rewrite_attachment_url($url, $attachment_id)
     {
@@ -281,13 +313,35 @@ class WPS3
             return $url;
         }
 
+        // Handle array input (sometimes WordPress passes arrays)
+        if (is_array($url)) {
+            $this->wps3_log("rewrite_attachment_url received array input for attachment {$attachment_id}: " . print_r($url, true), 'warning');
+            return $url;
+        }
+
+        // Ensure we have a string
+        if (!is_string($url) || empty($url)) {
+            $this->wps3_log("rewrite_attachment_url received non-string input for attachment {$attachment_id}: " . gettype($url), 'warning');
+            return $url;
+        }
+        
+        // Check cache first (memoization)
+        $cache_key = 'att_' . $attachment_id;
+        if (isset($this->url_cache[$cache_key])) {
+            return $this->url_cache[$cache_key];
+        }
+
         $s3_info = get_post_meta($attachment_id, 'wps3_s3_info', true);
         if (empty($s3_info) || empty($s3_info['key'])) {
+            // Cache the original URL (not migrated)
+            $this->url_cache[$cache_key] = $url;
             return $url;
         }
 
         // Check if the URL is already an S3 URL
         if (strpos($url, $this->s3_client_wrapper->get_bucket_name()) !== false) {
+            // Already rewritten, cache and return
+            $this->url_cache[$cache_key] = $url;
             return $url;
         }
 
@@ -301,7 +355,12 @@ class WPS3
         }
 
         // Allow filtering of the final URL
-        return apply_filters('wps3_file_url', $s3_url, $attachment_id, $s3_info, $url);
+        $s3_url = apply_filters('wps3_file_url', $s3_url, $attachment_id, $s3_info, $url);
+        
+        // Cache the result
+        $this->url_cache[$cache_key] = $s3_url;
+        
+        return $s3_url;
     }
 
     /**
@@ -443,12 +502,30 @@ class WPS3
      */
     public function rewrite_image_attributes($attr, $attachment, $size)
     {
-        if (isset($attr['src'])) {
+        if (isset($attr['src']) && is_string($attr['src'])) {
             $attr['src'] = $this->rewrite_attachment_url($attr['src'], $attachment->ID);
         }
-        if (isset($attr['srcset'])) {
-            $attr['srcset'] = $this->rewrite_srcset($attr['srcset'], [], '', [], $attachment->ID);
+
+        if (isset($attr['srcset']) && is_string($attr['srcset'])) {
+            // For srcset, we need to parse and rewrite each URL
+            $srcset_parts = explode(',', $attr['srcset']);
+            $rewritten_parts = [];
+            
+            foreach ($srcset_parts as $part) {
+                $part = trim($part);
+                if (preg_match('/^(.+?)\s+(\d+w|\d+x)$/', $part, $matches)) {
+                    $url = trim($matches[1]);
+                    $descriptor = $matches[2];
+                    $rewritten_url = $this->rewrite_attachment_url($url, $attachment->ID);
+                    $rewritten_parts[] = $rewritten_url . ' ' . $descriptor;
+                } else {
+                    $rewritten_parts[] = $part;
+                }
+            }
+            
+            $attr['srcset'] = implode(', ', $rewritten_parts);
         }
+
         return $attr;
     }
 
@@ -463,27 +540,32 @@ class WPS3
         if (!get_option('wps3_enabled') || !$this->s3_client_wrapper->get_s3_client()) {
             return $response;
         }
+        
         $s3_info = get_post_meta($attachment->ID, 'wps3_s3_info', true);
         if (!empty($s3_info) && isset($s3_info['key']) && $s3_info['bucket'] !== 'error') {
-            // Rewrite the main attachment URL
-            $response['url'] = $this->rewrite_attachment_url($response['url'], $attachment->ID);
+            // Rewrite the main attachment URL (only if it's a string)
+            if (isset($response['url']) && is_string($response['url'])) {
+                $response['url'] = $this->rewrite_attachment_url($response['url'], $attachment->ID);
+            }
 
             // Rewrite the icon URL if present (for non-image files)
-            if (isset($response['icon'])) {
+            if (isset($response['icon']) && is_string($response['icon'])) {
                 $response['icon'] = $this->rewrite_attachment_url($response['icon'], $attachment->ID);
             }
 
             // Rewrite the image preview URL if present (for PDFs, etc.)
-            if (isset($response['image'])) {
+            if (isset($response['image']) && is_string($response['image'])) {
                 $response['image'] = $this->rewrite_attachment_url($response['image'], $attachment->ID);
             }
 
             // Rewrite URLs for all available sizes (for images)
             if (isset($response['sizes']) && is_array($response['sizes'])) {
                 foreach ($response['sizes'] as $size_name => &$size_data) {
-                    $downsized = $this->rewrite_image_downsize(false, $attachment->ID, $size_name);
-                    if (is_array($downsized) && isset($downsized[0])) {
-                        $size_data['url'] = $downsized[0];
+                    if (is_array($size_data) && isset($size_data['url']) && is_string($size_data['url'])) {
+                        $downsized = $this->rewrite_image_downsize(false, $attachment->ID, $size_name);
+                        if (is_array($downsized) && isset($downsized[0])) {
+                            $size_data['url'] = $downsized[0];
+                        }
                     }
                 }
                 unset($size_data); // break reference
@@ -543,14 +625,776 @@ class WPS3
         delete_option('wps3_migration_running');
         delete_option('wps3_migration_file_list');
     }
+
+    /**
+     * Check S3 configuration status for debugging.
+     *
+     * @return array Configuration status
+     */
+    public function get_s3_config_status() {
+        $status = [
+            'plugin_enabled' => get_option('wps3_enabled'),
+            'bucket_name' => get_option('wps3_bucket_name'),
+            'bucket_folder' => get_option('wps3_bucket_folder'),
+            's3_endpoint_url' => get_option('wps3_s3_endpoint_url'),
+            's3_region' => get_option('wps3_s3_region'),
+            'access_key' => !empty(get_option('wps3_access_key')) ? 'Set' : 'Not set',
+            'secret_key' => !empty(get_option('wps3_secret_key')) ? 'Set' : 'Not set',
+            's3_client_available' => $this->s3_client_wrapper->get_s3_client() !== null,
+            'action_scheduler_available' => function_exists('as_enqueue_async_action'),
+        ];
+        
+        return $status;
+    }
+
+    /**
+     * Get S3 client wrapper.
+     *
+     * @return WPS3_S3_Client
+     */
+    public function get_s3_client_wrapper() {
+        return $this->s3_client_wrapper;
+    }
+
+    /**
+     * Get simple analytics data with caching.
+     * Uses WordPress queries instead of filesystem scanning for better performance.
+     *
+     * @param bool $force_refresh Force refresh the cache
+     * @return array
+     */
+    public function get_analytics($force_refresh = false) {
+        global $wpdb;
+        
+        // Check cache first (15 minute cache)
+        if (!$force_refresh) {
+            $cached = get_transient('wps3_analytics');
+            if ($cached !== false) {
+                return $cached;
+            }
+        }
+
+        $analytics = [
+            'total_attachments' => 0,
+            'migrated_attachments' => 0,
+            'pending_attachments' => 0,
+            'total_size_local' => 0,
+            'total_size_s3' => 0,
+            'bandwidth_saved' => 0,
+            'estimated_monthly_savings' => 0,
+        ];
+
+        try {
+            // Get attachment counts with optimized query (already properly using wpdb->prepare in JOIN)
+            $attachment_stats = $wpdb->get_row("
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN pm2.meta_value IS NOT NULL THEN 1 ELSE 0 END) as migrated,
+                    SUM(CASE WHEN pm2.meta_value IS NULL THEN 1 ELSE 0 END) as pending
+                FROM {$wpdb->posts} p
+                LEFT JOIN {$wpdb->postmeta} pm2 ON p.ID = pm2.post_id AND pm2.meta_key = 'wps3_s3_info'
+                WHERE p.post_type = 'attachment' AND p.post_mime_type != ''
+            ");
+
+            if ($attachment_stats) {
+                $analytics['total_attachments'] = (int) $attachment_stats->total;
+                $analytics['migrated_attachments'] = (int) $attachment_stats->migrated;
+                $analytics['pending_attachments'] = (int) $attachment_stats->pending;
+            }
+
+            // Calculate file sizes using WordPress attachment metadata instead of filesystem
+            // This is much faster and more reliable
+            
+            // Get total size of migrated files from WordPress metadata
+            $migrated_query = "
+                SELECT p.ID, pm.meta_value as metadata
+                FROM {$wpdb->posts} p
+                INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = '_wp_attachment_metadata'
+                INNER JOIN {$wpdb->postmeta} pm2 ON p.ID = pm2.post_id AND pm2.meta_key = 'wps3_s3_info'
+                WHERE p.post_type = 'attachment'
+                AND pm.meta_value IS NOT NULL
+                AND pm2.meta_value IS NOT NULL
+            ";
+            
+            $migrated_attachments = $wpdb->get_results($migrated_query);
+            $total_migrated_size = 0;
+            
+            foreach ($migrated_attachments as $attachment) {
+                $metadata = maybe_unserialize($attachment->metadata);
+                if ($metadata && isset($metadata['filesize'])) {
+                    $total_migrated_size += (int) $metadata['filesize'];
+                } elseif ($metadata && isset($metadata['width']) && isset($metadata['height'])) {
+                    // Estimate size if filesize not available (rough estimate)
+                    $total_migrated_size += ($metadata['width'] * $metadata['height'] * 3) / 2;
+                }
+            }
+            
+            $analytics['total_size_s3'] = $total_migrated_size;
+            
+            // Get total size of pending files from WordPress metadata
+            $pending_query = "
+                SELECT p.ID, pm.meta_value as metadata
+                FROM {$wpdb->posts} p
+                INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = '_wp_attachment_metadata'
+                LEFT JOIN {$wpdb->postmeta} pm2 ON p.ID = pm2.post_id AND pm2.meta_key = 'wps3_s3_info'
+                WHERE p.post_type = 'attachment'
+                AND pm.meta_value IS NOT NULL
+                AND pm2.meta_value IS NULL
+            ";
+            
+            $pending_attachments = $wpdb->get_results($pending_query);
+            $total_local_size = 0;
+            
+            foreach ($pending_attachments as $attachment) {
+                $metadata = maybe_unserialize($attachment->metadata);
+                if ($metadata && isset($metadata['filesize'])) {
+                    $total_local_size += (int) $metadata['filesize'];
+                } elseif ($metadata && isset($metadata['width']) && isset($metadata['height'])) {
+                    // Estimate size if filesize not available
+                    $total_local_size += ($metadata['width'] * $metadata['height'] * 3) / 2;
+                }
+            }
+            
+            $analytics['total_size_local'] = $total_local_size;
+
+            // Calculate bandwidth savings
+            // Assume files are accessed 100 times per month on average
+            $access_multiplier = 100;
+            $analytics['bandwidth_saved'] = $total_migrated_size * $access_multiplier;
+            
+            // Calculate cost savings
+            // AWS bandwidth out: $0.09 per GB
+            // S3 bandwidth is typically free or very cheap compared to server bandwidth
+            $server_bandwidth_cost_per_gb = 0.09;
+            $analytics['estimated_monthly_savings'] = ($analytics['bandwidth_saved'] / (1024 * 1024 * 1024)) * $server_bandwidth_cost_per_gb;
+
+        } catch (Exception $e) {
+            // Log error but don't break the page
+            $this->wps3_log('Analytics calculation failed: ' . $e->getMessage(), 'error');
+        }
+        
+        // Cache the results for 15 minutes
+        set_transient('wps3_analytics', $analytics, 15 * MINUTE_IN_SECONDS);
+
+        return $analytics;
+    }
+
+    /**
+     * Upload a file by attachment ID (for migration).
+     *
+     * @param int $attachment_id Attachment ID.
+     * @return bool|WP_Error
+     */
+    public function upload_file($attachment_id) {
+        if (!get_option('wps3_enabled') || !$this->s3_client_wrapper->get_s3_client()) {
+            return new WP_Error('s3_disabled', 'S3 upload is disabled or not configured');
+        }
+
+        // Get the attachment file path
+        $attached_file = get_post_meta($attachment_id, '_wp_attached_file', true);
+        if (empty($attached_file)) {
+            return new WP_Error('no_file', 'No attached file found for attachment ID: ' . $attachment_id);
+        }
+
+        $upload_dir = wp_upload_dir();
+        $file_path = trailingslashit($upload_dir['basedir']) . $attached_file;
+
+        if (!file_exists($file_path)) {
+            return new WP_Error('file_not_found', 'File not found: ' . $file_path);
+        }
+
+        // Check if already migrated
+        $s3_info = get_post_meta($attachment_id, 'wps3_s3_info', true);
+        if (!empty($s3_info) && isset($s3_info['key'])) {
+            $this->wps3_log("File already migrated, skipping: " . $file_path, 'info');
+            return true;
+        }
+
+        try {
+            // Fire action before upload
+            do_action('wps3_before_upload', $file_path, '', ['migration' => true, 'attachment_id' => $attachment_id]);
+
+            // Upload main file
+            $s3_key = $this->s3_client_wrapper->upload_file($file_path);
+            if (!$s3_key) {
+                return new WP_Error('upload_failed', 'Failed to upload file to S3: ' . $file_path);
+            }
+
+            // Save S3 info
+            $s3_info = [
+                'bucket' => $this->s3_client_wrapper->get_bucket_name(),
+                'key'    => $s3_key,
+                'url'    => $this->s3_client_wrapper->get_s3_url($s3_key),
+            ];
+            update_post_meta($attachment_id, 'wps3_s3_info', $s3_info);
+
+            $this->wps3_log("Successfully migrated attachment ID {$attachment_id}: {$file_path}", 'info');
+
+            // Fire action after upload
+            do_action('wps3_after_upload', $file_path, $s3_key, $s3_info['url'], [
+                'migration' => true,
+                'attachment_id' => $attachment_id
+            ]);
+
+            // Upload thumbnails
+            $this->upload_attachment_thumbnails($attachment_id, $file_path);
+
+            return true;
+
+        } catch (Exception $e) {
+            $error_msg = 'Exception during migration: ' . $e->getMessage();
+            $this->wps3_log($error_msg, 'error');
+            return new WP_Error('migration_exception', $error_msg);
+        }
+    }
+
+    /**
+     * Upload thumbnails for an attachment during migration.
+     *
+     * @param int $attachment_id Attachment ID.
+     * @param string $main_file_path Main file path.
+     */
+    private function upload_attachment_thumbnails($attachment_id, $main_file_path) {
+        $metadata = wp_get_attachment_metadata($attachment_id);
+        if (empty($metadata['sizes'])) {
+            return;
+        }
+
+        $upload_dir = wp_upload_dir();
+        $base_dir = trailingslashit(dirname($main_file_path));
+        $uploaded_thumbnails = 0;
+
+        foreach ($metadata['sizes'] as $size_name => $size_data) {
+            $thumb_path = $base_dir . $size_data['file'];
+            
+            if (file_exists($thumb_path)) {
+                try {
+                    // Fire action before thumbnail migration
+                    do_action('wps3_before_upload', $thumb_path, '', [
+                        'migration' => true,
+                        'thumbnail' => true,
+                        'size' => $size_name,
+                        'attachment_id' => $attachment_id
+                    ]);
+                    
+                    $thumb_key = $this->s3_client_wrapper->upload_file($thumb_path);
+                    if ($thumb_key) {
+                        $uploaded_thumbnails++;
+                        $this->wps3_log("Migrated thumbnail {$size_name} for attachment {$attachment_id}", 'info');
+                        
+                        // Fire action after thumbnail migration
+                        do_action('wps3_after_upload', $thumb_path, $thumb_key, $this->s3_client_wrapper->get_s3_url($thumb_key), [
+                            'migration' => true,
+                            'thumbnail' => true,
+                            'size' => $size_name,
+                            'attachment_id' => $attachment_id
+                        ]);
+                    }
+                } catch (Exception $e) {
+                    $this->wps3_log("Failed to migrate thumbnail {$size_name} for attachment {$attachment_id}: " . $e->getMessage(), 'error');
+                }
+            }
+        }
+        
+        if ($uploaded_thumbnails > 0) {
+            $this->wps3_log("Migrated {$uploaded_thumbnails} thumbnails for attachment {$attachment_id}", 'info');
+        }
+    }
+
+    /**
+     * Reset migration state for both legacy and v2 systems.
+     */
+    public function reset_migration_state() {
+        // Reset legacy migration state
+        update_option('wps3_migration_running', false);
+        update_option('wps3_migrated_files', 0);
+        update_option('wps3_migration_file_list', []);
+        delete_transient('wps3_migration_errors');
+        
+        // Reset v2 migration state
+        $default_state = [
+            'status' => 'ready',
+            'total' => 0,
+            'done' => 0,
+            'queued' => 0,
+            'processing' => 0,
+            'started_at' => 0,
+            'last_error' => '',
+            'batch_size' => 50,
+        ];
+        update_option('wps3_migration_state', $default_state);
+        
+        // Cancel any pending Action Scheduler jobs
+        if (function_exists('as_unschedule_all_actions')) {
+            as_unschedule_all_actions('wps3_do_batch', [], 'wps3');
+        }
+        
+        $this->wps3_log('Migration state reset to ready', 'info');
+    }
 }
+
+// Action Scheduler Integration for Background Jobs
+add_action('init', function() {
+    if (!function_exists('as_enqueue_async_action')) {
+        // Add admin notice if Action Scheduler is not available
+        add_action('admin_notices', function() {
+            if (current_user_can('manage_options')) {
+                echo '<div class="notice notice-warning is-dismissible">';
+                echo '<p><strong>WPS3:</strong> Action Scheduler plugin is required for background migration. Please install and activate the Action Scheduler plugin for optimal migration performance.</p>';
+                echo '</div>';
+            }
+        });
+        return;
+    }
+    
+    // Register the batch worker action
+    add_action('wps3_do_batch', 'wps3_batch_worker', 10, 1);
+});
+
+/**
+ * Background job worker for processing individual attachments
+ */
+function wps3_batch_worker($attachment_id) {
+    $state = get_option('wps3_migration_state', []);
+    if (empty($state) || 'running' !== $state['status']) {
+        WPS3_S3_Client::wps3_log("Background job skipped - migration not running. State: " . print_r($state, true), 'info');
+        return;
+    }
+
+    try {
+        // Get the WPS3 instance and upload the file
+        $wps3 = WPS3::get_instance();
+        $s3_client_wrapper = $wps3->get_s3_client_wrapper();
+        
+        if (!$s3_client_wrapper || !$s3_client_wrapper->get_s3_client()) {
+            throw new Exception('S3 client not available');
+        }
+
+        WPS3_S3_Client::wps3_log("Starting background job for attachment {$attachment_id}", 'info');
+        
+        $result = $wps3->upload_file($attachment_id);
+        
+        // Update state
+        $state = get_option('wps3_migration_state', []); // Re-fetch to avoid race conditions
+        $state['processing'] = max(0, $state['processing'] - 1);
+        $state['done'] += 1;
+        $state['queued'] = max(0, $state['queued'] - 1);
+        
+        if (is_wp_error($result)) {
+            $error_code = $result->get_error_code();
+            $error_message = $result->get_error_message();
+            
+            // For missing files, log but don't treat as critical error
+            if ($error_code === 'file_not_found') {
+                WPS3_S3_Client::wps3_log("File not found for attachment {$attachment_id}, marking as processed: {$error_message}", 'warning');
+                $state['last_error'] = ''; // Don't show file not found as last error
+            } else {
+                $state['last_error'] = $error_message;
+                WPS3_S3_Client::wps3_log("Migration failed for attachment {$attachment_id}: {$error_message}", 'error');
+            }
+        } else {
+            $state['last_error'] = '';
+            WPS3_S3_Client::wps3_log("Successfully processed attachment {$attachment_id} in background job", 'info');
+        }
+        
+        // Check if migration is complete
+        if ($state['done'] >= $state['total'] && $state['processing'] <= 0 && $state['queued'] <= 0) {
+            $state['status'] = 'finished';
+            WPS3_S3_Client::wps3_log("Migration completed! Processed {$state['done']} of {$state['total']} files", 'info');
+        }
+        
+        update_option('wps3_migration_state', $state);
+        
+    } catch (Exception $e) {
+        $state = get_option('wps3_migration_state', []); // Re-fetch to avoid race conditions
+        $state['processing'] = max(0, $state['processing'] - 1);
+        $state['done'] += 1; // Still count as processed even if failed
+        $state['queued'] = max(0, $state['queued'] - 1);
+        $state['last_error'] = $e->getMessage();
+        
+        // Check completion even after exception
+        if ($state['done'] >= $state['total'] && $state['processing'] <= 0 && $state['queued'] <= 0) {
+            $state['status'] = 'finished';
+            WPS3_S3_Client::wps3_log("Migration completed after exception! Processed {$state['done']} of {$state['total']} files", 'info');
+        }
+        
+        update_option('wps3_migration_state', $state);
+        WPS3_S3_Client::wps3_log("Background job exception for attachment {$attachment_id}: " . $e->getMessage(), 'error');
+    }
+}
+
+// REST API Endpoints for Migration Control
+add_action('rest_api_init', function() {
+    register_rest_route('wps3/v1', '/migrate', [
+        'methods' => 'POST',
+        'callback' => 'wps3_api_migrate',
+        'permission_callback' => 'wps3_check_permissions',
+        'args' => [
+            'do' => [
+                'required' => true,
+                'type' => 'string',
+                'enum' => ['start', 'pause', 'resume', 'cancel'],
+            ],
+        ],
+    ]);
+    
+    register_rest_route('wps3/v1', '/status', [
+        'methods' => 'GET',
+        'callback' => 'wps3_api_status',
+        'permission_callback' => 'wps3_check_permissions',
+    ]);
+    
+    register_rest_route('wps3/v1', '/debug', [
+        'methods' => 'GET',
+        'callback' => 'wps3_api_debug',
+        'permission_callback' => 'wps3_check_permissions',
+    ]);
+});
+
+/**
+ * Check permissions for REST API endpoints
+ */
+function wps3_check_permissions($request) {
+    // Check if user has manage_options capability
+    if (!current_user_can('manage_options')) {
+        return false;
+    }
+    
+    // For admin-ajax requests, check nonce
+    if (defined('DOING_AJAX') && DOING_AJAX) {
+        return wp_verify_nonce($request->get_header('X-WP-Nonce'), 'wps3_nonce');
+    }
+    
+    // For REST requests, check if user is logged in and has proper capabilities
+    if (is_user_logged_in()) {
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * REST API endpoint for migration control
+ */
+function wps3_api_migrate($request) {
+    $action = $request->get_param('do');
+    $state = get_option('wps3_migration_state', []);
+    
+    switch ($action) {
+        case 'start':
+            if (empty($state) || in_array($state['status'], ['finished', 'error', 'cancelled'])) {
+                global $wpdb;
+                
+                // Get all attachment IDs that need migration (not already migrated)
+                $ids = $wpdb->get_col(
+                    "SELECT p.ID FROM {$wpdb->posts} p
+                     LEFT JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = 'wps3_s3_info'
+                     WHERE p.post_type = 'attachment' 
+                     AND p.post_mime_type != ''
+                     AND pm.meta_value IS NULL
+                     ORDER BY p.ID ASC"
+                );
+                
+                $batch_size = 50;
+                $total_ids = count($ids);
+                
+                if ($total_ids === 0) {
+                    $state = [
+                        'status' => 'finished',
+                        'total' => 0,
+                        'done' => 0,
+                        'queued' => 0,
+                        'processing' => 0,
+                        'started_at' => time(),
+                        'last_error' => 'No attachments found that need migration',
+                        'batch_size' => $batch_size,
+                    ];
+                    update_option('wps3_migration_state', $state);
+                    WPS3_S3_Client::wps3_log("No attachments found that need migration", 'info');
+                    break;
+                }
+                
+                $state = [
+                    'status' => 'running',
+                    'total' => $total_ids,
+                    'done' => 0,
+                    'queued' => $total_ids,
+                    'processing' => 0,
+                    'started_at' => time(),
+                    'last_error' => '',
+                    'batch_size' => $batch_size,
+                ];
+                
+                update_option('wps3_migration_state', $state);
+                WPS3_S3_Client::wps3_log("Starting migration for {$total_ids} attachments", 'info');
+                
+                // Queue all jobs if Action Scheduler is available
+                if (function_exists('as_enqueue_async_action')) {
+                    foreach ($ids as $id) {
+                        as_enqueue_async_action('wps3_do_batch', [$id], 'wps3');
+                        $state['processing']++;
+                    }
+                    update_option('wps3_migration_state', $state);
+                    WPS3_S3_Client::wps3_log("Queued {$total_ids} jobs with Action Scheduler", 'info');
+                } else {
+                    $state['last_error'] = 'Action Scheduler not available - background migration disabled';
+                    $state['status'] = 'error';
+                    update_option('wps3_migration_state', $state);
+                    WPS3_S3_Client::wps3_log("Action Scheduler not available for background migration", 'error');
+                }
+            }
+            break;
+            
+        case 'pause':
+            if (!empty($state) && $state['status'] === 'running') {
+                $state['status'] = 'paused';
+                update_option('wps3_migration_state', $state);
+            }
+            break;
+            
+        case 'resume':
+            if (!empty($state) && $state['status'] === 'paused') {
+                $state['status'] = 'running';
+                update_option('wps3_migration_state', $state);
+            }
+            break;
+            
+        case 'cancel':
+            if (!empty($state) && in_array($state['status'], ['running', 'paused'])) {
+                $state['status'] = 'cancelled';
+                update_option('wps3_migration_state', $state);
+                
+                // Cancel all pending jobs
+                if (function_exists('as_unschedule_all_actions')) {
+                    as_unschedule_all_actions('wps3_do_batch', [], 'wps3');
+                }
+            }
+            break;
+    }
+    
+    return rest_ensure_response($state);
+}
+
+/**
+ * REST API endpoint for getting migration status
+ */
+function wps3_api_status($request) {
+    $state = get_option('wps3_migration_state', []);
+    
+    // Set default values if state is empty
+    if (empty($state)) {
+        $state = [
+            'status' => 'ready',
+            'total' => 0,
+            'done' => 0,
+            'queued' => 0,
+            'processing' => 0,
+            'started_at' => 0,
+            'last_error' => '',
+            'batch_size' => 50,
+        ];
+    }
+    
+    // Additional completion check for edge cases
+    if ($state['status'] === 'running' && $state['total'] > 0) {
+        // Check if migration should be marked as complete
+        if ($state['done'] >= $state['total'] && $state['processing'] <= 0 && $state['queued'] <= 0) {
+            $state['status'] = 'finished';
+            update_option('wps3_migration_state', $state);
+            WPS3_S3_Client::wps3_log("Migration marked as completed via status check. Processed {$state['done']} of {$state['total']} files", 'info');
+        }
+        // Also check for stale processing jobs - if no jobs have been active for too long
+        elseif ($state['processing'] > 0 && function_exists('as_get_scheduled_actions')) {
+            $pending_jobs = as_get_scheduled_actions([
+                'hook' => 'wps3_do_batch',
+                'status' => ['pending', 'in-progress'],
+                'per_page' => 1
+            ]);
+            
+            // If no actual pending jobs but state shows processing, fix the state
+            if (empty($pending_jobs)) {
+                $state['processing'] = 0;
+                $state['queued'] = 0;
+                
+                // Check completion again with corrected state
+                if ($state['done'] >= $state['total']) {
+                    $state['status'] = 'finished';
+                    WPS3_S3_Client::wps3_log("Migration completed after correcting stale processing count. Processed {$state['done']} of {$state['total']} files", 'info');
+                }
+                
+                update_option('wps3_migration_state', $state);
+            }
+        }
+    }
+    
+    return rest_ensure_response($state);
+}
+
+/**
+ * REST API endpoint for debugging
+ */
+function wps3_api_debug($request) {
+    $wps3 = WPS3::get_instance();
+    $s3_client_wrapper = $wps3->get_s3_client_wrapper();
+    
+    $debug_info = [
+        'plugin_enabled' => get_option('wps3_enabled'),
+        's3_client_available' => $s3_client_wrapper->get_s3_client() !== null,
+        's3_config' => $wps3->get_s3_config_status(),
+        'migration_state' => get_option('wps3_migration_state', []),
+    ];
+    
+    return rest_ensure_response($debug_info);
+}
+
+// Admin AJAX shim for backward compatibility
+add_action('wp_ajax_wps3_state', function() {
+    $state = get_option('wps3_migration_state', []);
+    
+    // Set default values if state is empty
+    if (empty($state)) {
+        $state = [
+            'status' => 'ready',
+            'total' => 0,
+            'done' => 0,
+            'queued' => 0,
+            'processing' => 0,
+            'started_at' => 0,
+            'last_error' => '',
+            'batch_size' => 50,
+        ];
+    }
+    
+    // Additional completion check for edge cases
+    if ($state['status'] === 'running' && $state['total'] > 0) {
+        // Check if migration should be marked as complete
+        if ($state['done'] >= $state['total'] && $state['processing'] <= 0 && $state['queued'] <= 0) {
+            $state['status'] = 'finished';
+            update_option('wps3_migration_state', $state);
+            WPS3_S3_Client::wps3_log("Migration marked as completed via AJAX status check. Processed {$state['done']} of {$state['total']} files", 'info');
+        }
+        // Also check for stale processing jobs
+        elseif ($state['processing'] > 0 && function_exists('as_get_scheduled_actions')) {
+            $pending_jobs = as_get_scheduled_actions([
+                'hook' => 'wps3_do_batch',
+                'status' => ['pending', 'in-progress'],
+                'per_page' => 1
+            ]);
+            
+            // If no actual pending jobs but state shows processing, fix the state
+            if (empty($pending_jobs)) {
+                $state['processing'] = 0;
+                $state['queued'] = 0;
+                
+                // Check completion again with corrected state
+                if ($state['done'] >= $state['total']) {
+                    $state['status'] = 'finished';
+                    WPS3_S3_Client::wps3_log("Migration completed after correcting stale processing count via AJAX. Processed {$state['done']} of {$state['total']} files", 'info');
+                }
+                
+                update_option('wps3_migration_state', $state);
+            }
+        }
+    }
+    
+    wp_send_json_success($state);
+});
+
+add_action('wp_ajax_wps3_api', function() {
+    // Verify nonce for admin-ajax requests
+    if (!wp_verify_nonce($_POST['nonce'] ?? '', 'wps3_nonce')) {
+        wp_send_json_error(['message' => 'Invalid nonce'], 403);
+        return;
+    }
+    
+    $action = sanitize_text_field($_POST['do'] ?? '');
+    $request = new WP_REST_Request('POST', '/wps3/v1/migrate');
+    $request->set_param('do', $action);
+    $response = wps3_api_migrate($request);
+    wp_send_json_success($response->get_data());
+});
+
+// Add manual completion check endpoint
+add_action('wp_ajax_wps3_force_complete', function() {
+    // Verify nonce for admin-ajax requests
+    if (!wp_verify_nonce($_POST['nonce'] ?? '', 'wps3_nonce')) {
+        wp_send_json_error(['message' => 'Invalid nonce'], 403);
+        return;
+    }
+    
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Permission denied'], 403);
+        return;
+    }
+    
+    $state = get_option('wps3_migration_state', []);
+    
+    if ($state['status'] === 'running' && $state['total'] > 0) {
+        // Force completion check
+        if ($state['done'] >= $state['total'] || ($state['processing'] <= 0 && $state['queued'] <= 0)) {
+            $state['status'] = 'finished';
+            $state['processing'] = 0;
+            $state['queued'] = 0;
+            update_option('wps3_migration_state', $state);
+            
+            WPS3_S3_Client::wps3_log("Migration manually marked as completed. Processed {$state['done']} of {$state['total']} files", 'info');
+            
+            wp_send_json_success([
+                'message' => 'Migration marked as complete',
+                'state' => $state
+            ]);
+        } else {
+            wp_send_json_error(['message' => 'Migration is not ready to be completed']);
+        }
+    } else {
+        wp_send_json_error(['message' => 'Migration is not in running state']);
+    }
+});
+
+add_action('wp_ajax_wps3_debug', function() {
+    // Verify nonce for admin-ajax requests
+    if (!wp_verify_nonce($_POST['nonce'] ?? '', 'wps3_nonce')) {
+        wp_send_json_error(['message' => 'Invalid nonce'], 403);
+        return;
+    }
+    
+    $wps3 = WPS3::get_instance();
+    $debug_info = $wps3->get_s3_config_status();
+    $debug_info['migration_state'] = get_option('wps3_migration_state', []);
+    
+    // Get sample of attachments that need migration
+    global $wpdb;
+    $sample_attachments = $wpdb->get_results(
+        "SELECT p.ID, p.post_title, pm.meta_value as file_path
+         FROM {$wpdb->posts} p
+         LEFT JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = '_wp_attached_file'
+         LEFT JOIN {$wpdb->postmeta} pm2 ON p.ID = pm2.post_id AND pm2.meta_key = 'wps3_s3_info'
+         WHERE p.post_type = 'attachment' 
+         AND p.post_mime_type != ''
+         AND pm.meta_value IS NOT NULL
+         AND pm2.meta_value IS NULL
+         ORDER BY p.ID DESC
+         LIMIT 5"
+    );
+    
+    $debug_info['sample_attachments'] = $sample_attachments;
+    $debug_info['total_attachments_needing_migration'] = $wpdb->get_var(
+        "SELECT COUNT(p.ID) FROM {$wpdb->posts} p
+         LEFT JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = 'wps3_s3_info'
+         WHERE p.post_type = 'attachment' 
+         AND p.post_mime_type != ''
+         AND pm.meta_value IS NULL"
+    );
+    
+    wp_send_json_success($debug_info);
+});
 
 /**
  * Initialize the plugin.
  */
 function register_wps3()
 {
-    new WPS3();
+    WPS3::get_instance();
     add_filter('plugin_action_links_' . plugin_basename(WPS3_PLUGIN_FILE), function ($links) {
         $settings_link = '<a href="' . admin_url('options-general.php?page=wps3-settings') . '">' . __('Settings', 'wps3') . '</a>';
         array_unshift($links, $settings_link);
