@@ -306,7 +306,7 @@ class WPS3_Migration_V2 {
                 </div><!-- /post-body -->
             </div><!-- /poststuff -->
 
-        </div><!-- /wrap -->>
+        </div><!-- /wrap -->
 
         <script>
         (function($) {
