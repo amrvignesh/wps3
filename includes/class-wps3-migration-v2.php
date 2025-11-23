@@ -68,193 +68,245 @@ class WPS3_Migration_V2 {
     public function render_migration_page_v2() {
         ?>
         <div class="wrap">
-            <h1><span class="dashicons dashicons-cloud-upload"></span> S3 Migration Control</h1>
+            <h1 class="wp-heading-inline">
+                <span class="dashicons dashicons-cloud-upload" style="font-size: 24px; width: 24px; height: 24px; vertical-align: middle; margin-right: 8px;"></span>
+                <?php _e('S3 Migration', 'wps3'); ?>
+            </h1>
+            <hr class="wp-header-end">
 
-            <!-- Welcome Card -->
-            <div class="wps3-migration-card">
-                <div class="wps3-card-header">
-                    <h2><span class="dashicons dashicons-info"></span> Migration Overview</h2>
-                </div>
-                <div class="wps3-card-content">
-                    <p class="wps3-intro-text">
-                        Migrate your existing media files to S3 storage. The migration runs in the background and won't interrupt your site.
-                    </p>
-                    <div class="wps3-quick-stats">
-                        <div class="wps3-stat">
-                            <span class="wps3-stat-number" id="total-files">0</span>
-                            <span class="wps3-stat-label">Files to Migrate</span>
-                        </div>
-                        <div class="wps3-stat">
-                            <span class="wps3-stat-number" id="completed-files">0</span>
-                            <span class="wps3-stat-label">Completed</span>
-                        </div>
-                        <div class="wps3-stat">
-                            <span class="wps3-stat-number" id="migration-status">Ready</span>
-                            <span class="wps3-stat-label">Status</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- Admin Notices Placeholder -->
+            <div id="wps3-notices"></div>
 
-            <!-- Control Panel -->
-            <div class="wps3-migration-card">
-                <div class="wps3-card-header">
-                    <h2><span class="dashicons dashicons-controls-play"></span> Migration Controls</h2>
-                </div>
-                <div class="wps3-card-content">
-                    <div class="wps3-control-buttons">
-                        <button id="wps3-start" class="wps3-btn wps3-btn-primary">
-                            <span class="dashicons dashicons-controls-play"></span>
-                            <span>Start Migration</span>
-                        </button>
-                        <button id="wps3-pause" class="wps3-btn wps3-btn-secondary" disabled>
-                            <span class="dashicons dashicons-controls-pause"></span>
-                            <span>Pause</span>
-                        </button>
-                        <button id="wps3-resume" class="wps3-btn wps3-btn-secondary" disabled>
-                            <span class="dashicons dashicons-controls-play"></span>
-                            <span>Resume</span>
-                        </button>
-                        <button id="wps3-cancel" class="wps3-btn wps3-btn-danger" disabled>
-                            <span class="dashicons dashicons-no"></span>
-                            <span>Cancel</span>
-                        </button>
-                    </div>
-
-                    <!-- Progress Section -->
-                    <div class="wps3-progress-container">
-                        <div class="wps3-progress-header">
-                            <span class="wps3-progress-title">Migration Progress</span>
-                            <span class="wps3-progress-percentage" id="progress-percentage">0%</span>
-                        </div>
-                        <div class="wps3-progress-bar-wrapper">
-                            <div class="wps3-progress-bar" id="migration-progress-bar">
-                                <div class="wps3-progress-fill" id="progress-fill"></div>
-                            </div>
-                        </div>
-                        <div class="wps3-progress-stats">
-                            <div class="wps3-progress-stat">
-                                <span class="wps3-stat-label">Speed:</span>
-                                <span class="wps3-stat-value" id="current-speed">0 /min</span>
-                            </div>
-                            <div class="wps3-progress-stat">
-                                <span class="wps3-stat-label">Time:</span>
-                                <span class="wps3-stat-value" id="elapsed-time">--</span>
-                            </div>
-                            <div class="wps3-progress-stat">
-                                <span class="wps3-stat-label">ETA:</span>
-                                <span class="wps3-stat-value" id="eta-time">--</span>
-                            </div>
-                        </div>
+            <!-- Two Column Layout -->
+            <div id="poststuff">
+                <div id="post-body" class="metabox-holder columns-2">
+                    
+                    <!-- Main Column -->
+                    <div id="post-body-content">
                         
-                        <!-- Current File Being Migrated -->
-                        <div class="wps3-current-file" id="current-file-section" style="display: none;">
-                            <span class="wps3-file-label">📁 Currently migrating:</span>
-                            <span class="wps3-file-name" id="current-file-name">--</span>
-                        </div>
-                    </div>
-
-                    <!-- Error Display -->
-                    <div class="wps3-error-container" id="error-container" style="display: none;">
-                        <div class="wps3-error-message" id="error-message"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Failed Files Section -->
-            <div class="wps3-migration-card wps3-failed-section" id="failed-files-section" style="display: none;">
-                <div class="wps3-card-header">
-                    <h2>
-                        <span class="dashicons dashicons-warning"></span> 
-                        Failed Files 
-                        <span class="wps3-badge wps3-badge-error" id="failed-count">0</span>
-                    </h2>
-                </div>
-                <div class="wps3-card-content">
-                    <div class="wps3-failed-actions">
-                        <button id="retry-all-failed" class="wps3-btn wps3-btn-primary">
-                            <span class="dashicons dashicons-update"></span>
-                            Retry All Failed Files
-                        </button>
-                        <button id="clear-failed" class="wps3-btn wps3-btn-secondary">
-                            <span class="dashicons dashicons-dismiss"></span>
-                            Clear List
-                        </button>
-                    </div>
-                    <div class="wps3-failed-list" id="failed-files-list">
-                        <!-- Failed files will be populated here -->
-                    </div>
-                </div>
-            </div>
-
-            <!-- Bandwidth Savings -->
-            <div class="wps3-migration-card wps3-savings-card" id="savings-section" style="display: none;">
-                <div class="wps3-card-header">
-                    <h2>
-                        <span class="dashicons dashicons-chart-line"></span> 
-                        Bandwidth Savings
-                    </h2>
-                </div>
-                <div class="wps3-card-content">
-                    <div class="wps3-savings-grid">
-                        <div class="wps3-saving-item">
-                            <span class="wps3-saving-value" id="total-size-migrated">0 MB</span>
-                            <span class="wps3-saving-label">Total Migrated</span>
-                        </div>
-                        <div class="wps3-saving-item">
-                            <span class="wps3-saving-value" id="bandwidth-saved">0 GB/mo</span>
-                            <span class="wps3-saving-label">Est. Bandwidth Saved</span>
-                        </div>
-                        <div class="wps3-saving-item">
-                            <span class="wps3-saving-value" id="files-offloaded">0</span>
-                            <span class="wps3-saving-label">Files Offloaded</span>
-                        </div>
-                    </div>
-                    <div class="wps3-savings-note">
-                        <small>💡 Based on industry average: 70% of bandwidth is media delivery. Your hosting bandwidth costs are now significantly reduced!</small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Information Card -->
-            <div class="wps3-migration-card">
-                <div class="wps3-card-header">
-                    <h2><span class="dashicons dashicons-lightbulb"></span> How It Works</h2>
-                </div>
-                <div class="wps3-card-content">
-                    <div class="wps3-features-grid">
-                        <div class="wps3-feature">
-                            <span class="dashicons dashicons-clock"></span>
-                            <div>
-                                <h4>Background Processing</h4>
-                                <p>Runs in the background using WordPress Action Scheduler</p>
+                        <!-- Migration Control Postbox -->
+                        <div class="postbox">
+                            <div class="postbox-header">
+                                <h2 class="hndle"><span class="dashicons dashicons-controls-play"></span> <?php _e('Migration Controls', 'wps3'); ?></h2>
+                                <div class="handle-actions hide-if-no-js">
+                                    <button type="button" class="handlediv" aria-expanded="true">
+                                        <span class="screen-reader-text"><?php _e('Toggle panel', 'wps3'); ?></span>
+                                        <span class="toggle-indicator" aria-hidden="true"></span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="inside">
+                                <div class="wps3-control-section">
+                                    <p class="wps3-status-badge">
+                                        <span class="dashicons dashicons-info" style="color: #2271b1;"></span>
+                                        <strong><?php _e('Status:', 'wps3'); ?></strong> <span id="migration-status-text">Ready</span>
+                                    </p>
+                                    
+                                    <div class="wps3-button-group">
+                                        <button id="wps3-start" class="button button-primary button-hero">
+                                            <span class="dashicons dashicons-controls-play"></span>
+                                            <?php _e('Start Migration', 'wps3'); ?>
+                                        </button>
+                                        <button id="wps3-pause" class="button button-large" disabled>
+                                            <span class="dashicons dashicons-controls-pause"></span>
+                                            <?php _e('Pause', 'wps3'); ?>
+                                        </button>
+                                        <button id="wps3-resume" class="button button-large" disabled style="display: none;">
+                                            <span class="dashicons dashicons-controls-play"></span>
+                                            <?php _e('Resume', 'wps3'); ?>
+                                        </button>
+                                        <button id="wps3-cancel" class="button button-link-delete" disabled>
+                                            <span class="dashicons dashicons-no"></span>
+                                            <?php _e('Cancel', 'wps3'); ?>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <div class="wps3-feature">
-                            <span class="dashicons dashicons-update"></span>
-                            <div>
-                                <h4>Survives Reloads</h4>
-                                <p>Close your browser - migration continues running</p>
+
+                        <!-- Progress Monitor Postbox -->
+                        <div class="postbox">
+                            <div class="postbox-header">
+                                <h2 class="hndle"><span class="dashicons dashicons-chart-bar"></span> <?php _e('Migration Progress', 'wps3'); ?></h2>
+                                <div class="handle-actions hide-if-no-js">
+                                    <button type="button" class="handlediv" aria-expanded="true">
+                                        <span class="screen-reader-text"><?php _e('Toggle panel', 'wps3'); ?></span>
+                                        <span class="toggle-indicator" aria-hidden="true"></span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="inside">
+                                <!-- Progress Bar -->
+                                <div class="wps3-wp-progress-wrapper">
+                                    <div class="wps3-progress-label">
+                                        <span id="progress-percentage">0%</span>
+                                        <span class="wps3-progress-count" id="progress-count">0 / 0 files</span>
+                                    </div>
+                                    <div class="wps3-wp-progress-bar">
+                                        <div class="wps3-wp-progress-fill" id="progress-fill" style="width: 0%;"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Current File -->
+                                <div id="current-file-section" style="display: none; margin-top: 15px; padding: 10px; background: #f0f6fc; border-left: 3px solid #2271b1; border-radius: 3px;">
+                                    <small style="color: #666;"><?php _e('Currently migrating:', 'wps3'); ?></small>
+                                    <code id="current-file-name" style="display: block; margin-top: 4px;">--</code>
+                                </div>
+
+                                <!-- Stats Table -->
+                                <table class="widefat fixed striped" style="margin-top: 20px;">
+                                    <tbody>
+                                        <tr>
+                                            <td style="width: 30%;"><strong><?php _e('Total Files:', 'wps3'); ?></strong></td>
+                                            <td id="total-files">0</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong><?php _e('Completed:', 'wps3'); ?></strong></td>
+                                            <td id="completed-files">0</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong><?php _e('Speed:', 'wps3'); ?></strong></td>
+                                            <td id="current-speed">0 /min</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong><?php _e('Elapsed Time:', 'wps3'); ?></strong></td>
+                                            <td id="elapsed-time">--</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong><?php _e('Estimated Time:', 'wps3'); ?></strong></td>
+                                            <td id="eta-time">--</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
-                        <div class="wps3-feature">
-                            <span class="dashicons dashicons-admin-tools"></span>
-                            <div>
-                                <h4>Server Restarts</h4>
-                                <p>Automatically resumes after server restarts</p>
+
+                        <!-- Failed Files Postbox -->
+                        <div class="postbox" id="failed-files-section" style="display: none;">
+                            <div class="postbox-header">
+                                <h2 class="hndle">
+                                    <span class="dashicons dashicons-warning" style="color: #d63638;"></span>
+                                    <?php _e('Failed Files', 'wps3'); ?>
+                                    <span class="wps3-count-badge" id="failed-count">0</span>
+                                </h2>
+                                <div class="handle-actions hide-if-no-js">
+                                    <button type="button" class="handlediv" aria-expanded="true">
+                                        <span class="screen-reader-text"><?php _e('Toggle panel', 'wps3'); ?></span>
+                                        <span class="toggle-indicator" aria-hidden="true"></span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="inside">
+                                <div style="margin-bottom: 15px;">
+                                    <button id="retry-all-failed" class="button">
+                                        <span class="dashicons dashicons-update-alt"></span>
+                                        <?php _e('Retry All', 'wps3'); ?>
+                                    </button>
+                                    <button id="clear-failed" class="button">
+                                        <span class="dashicons dashicons-dismiss"></span>
+                                        <?php _e('Clear List', 'wps3'); ?>
+                                    </button>
+                                </div>
+                                <table class="wp-list-table widefat fixed striped" id="failed-files-table" style="display: none;">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 50%;"><?php _e('File', 'wps3'); ?></th>
+                                            <th style="width: 35%;"><?php _e('Error', 'wps3'); ?></th>
+                                            <th style="width: 15%;"><?php _e('Action', 'wps3'); ?></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="failed-files-list">
+                                        <!-- Failed files populated here -->
+                                    </tbody>
+                                </table>
+                                <p id="no-failed-message"><?php _e('No failed files.', 'wps3'); ?></p>
                             </div>
                         </div>
-                        <div class="wps3-feature">
-                            <span class="dashicons dashicons-visibility"></span>
-                            <div>
-                                <h4>Real-time Updates</h4>
-                                <p>Live progress updates every few seconds</p>
+
+                    </div><!-- /post-body-content -->
+
+                    <!-- Sidebar -->
+                    <div id="postbox-container-1" class="postbox-container">
+                        
+                        <!-- Quick Stats -->
+                        <div class="postbox">
+                            <div class="postbox-header">
+                                <h2 class="hndle"><?php _e('Quick Stats', 'wps3'); ?></h2>
+                            </div>
+                            <div class="inside">
+                                <ul class="wps3-stats-sidebar">
+                                    <li>
+                                        <span class="dashicons dashicons-cloud-saved"></span>
+                                        <div>
+                                            <strong id="total-size-migrated">0 MB</strong>
+                                            <small><?php _e('Migrated', 'wps3'); ?></small>
+                                        </div>
+                                    </li>
+                                    <li>
+                                        <span class="dashicons dashicons-chart-line"></span>
+                                        <div>
+                                            <strong id="bandwidth-saved">0 GB/mo</strong>
+                                            <small><?php _e('Bandwidth Saved', 'wps3'); ?></small>
+                                        </div>
+                                    </li>
+                                    <li>
+                                        <span class="dashicons dashicons-upload"></span>
+                                        <div>
+                                            <strong id="files-offloaded">0</strong>
+                                            <small><?php _e('Files Offloaded', 'wps3'); ?></small>
+                                        </div>
+                                    </li>
+                                </ul>
+                                <p class="description" style="margin: 15px 0 0 0; padding: 10px; background: #f0f6fc; border-radius: 3px;">
+                                    <small><?php _e('💡 Estimated monthly bandwidth reduction based on 70% media traffic.', 'wps3'); ?></small>
+                                </p>
                             </div>
                         </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+
+                        <!-- How It Works -->
+                        <div class="postbox">
+                            <div class="postbox-header">
+                                <h2 class="hndle"><?php _e('How It Works', 'wps3'); ?></h2>
+                            </div>
+                            <div class="inside">
+                                <ul style="margin: 0; padding-left: 20px;">
+                                    <li style="margin-bottom: 10px;">
+                                        <strong><?php _e('Background Processing', 'wps3'); ?></strong>
+                                        <p class="description" style="margin: 4px 0 0 0;"><?php _e('Runs in background using WordPress Action Scheduler', 'wps3'); ?></p>
+                                    </li>
+                                    <li style="margin-bottom: 10px;">
+                                        <strong><?php _e('Survives Reloads', 'wps3'); ?></strong>
+                                        <p class="description" style="margin: 4px 0 0 0;"><?php _e('Close your browser - migration continues', 'wps3'); ?></p>
+                                    </li>
+                                    <li style="margin-bottom: 10px;">
+                                        <strong><?php _e('Auto-Resumes', 'wps3'); ?></strong>
+                                        <p class="description" style="margin: 4px 0 0 0;"><?php _e('Automatically resumes after server restarts', 'wps3'); ?></p>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <!-- Debug Actions -->
+                        <div class="postbox" style="display: none;" id="debug-actions-box">
+                            <div class="postbox-header">
+                                <h2 class="hndle"><?php _e('Debug', 'wps3'); ?></h2>
+                            </div>
+                            <div class="inside">
+                                <button id="wps3-debug" class="button button-small" style="width: 100%;">
+                                    <?php _e('Show Debug Info', 'wps3'); ?>
+                                </button>
+                                <button id="wps3-force-complete" class="button button-small" style="width: 100%; margin-top: 8px;">
+                                    <?php _e('Force Complete', 'wps3'); ?>
+                                </button>
+                            </div>
+                        </div>
+
+                    </div><!-- /postbox-container-1 -->
+
+                </div><!-- /post-body -->
+            </div><!-- /poststuff -->
+
+        </div><!-- /wrap -->>
 
         <script>
         (function($) {
@@ -624,7 +676,34 @@ class WPS3_Migration_V2 {
                 clearTimeout(refreshTimer);
             });
             
-            // Failed Files Functions
+            // WordPress Admin Notices
+            function showNotice(message,type = 'info') {
+                const noticeClass = 'notice-' + type;
+                const isDismissible = type !== 'error' ? 'is-dismissible' : '';
+                
+                const $notice = $(`
+                    <div class="notice ${noticeClass} ${isDismissible}">
+                        <p>${message}</p>
+                        ${isDismissible ? '<button type="button" class="notice-dismiss"><span class="screen-reader-text">Dismiss this notice.</span></button>' : ''}
+                    </div>
+                `);
+                
+                $('#wps3-notices').html($notice);
+                
+                // Handle dismiss button
+                $notice.find('.notice-dismiss').on('click', function() {
+                    $notice.fadeOut(300, function() { $(this).remove(); });
+                });
+                
+                // Auto-dismiss success/info notices after 5 seconds
+                if (['success', 'info'].includes(type)) {
+                    setTimeout(() => {
+                        $notice.fadeOut(300, function() { $(this).remove(); });
+                    }, 5000);
+                }
+            }
+            
+            // Failed Files Functions (updated for WordPress table)
             function addFailedFile(fileName, errorMessage) {
                 if (!failedFiles.find(f => f.file === fileName)) {
                     failedFiles.push({file: fileName, error: errorMessage});
@@ -633,27 +712,34 @@ class WPS3_Migration_V2 {
             }
             
             function updateFailedFilesDisplay() {
-                $('#failed-count').text(failedFiles.length);
+                const count = failedFiles.length;
+                $('#failed-count').text(count);
                 
-                if (failedFiles.length > 0) {
+                if (count > 0) {
                     $('#failed-files-section').slideDown();
+                    $('#failed-files-table').show();
+                    $('#no-failed-message').hide();
+                    
                     let html = '';
                     failedFiles.forEach(item => {
                         html += `
-                            <div class="wps3-failed-item" data-file="${escapeHtml(item.file)}">
-                                <div>
-                                    <div class="wps3-failed-file-name">${escapeHtml(item.file)}</div>
-                                    <div class="wps3-failed-error">${escapeHtml(item.error)}</div>
-                                </div>
-                                <button class="wps3-btn wps3-btn-small retry-single" data-file="${escapeHtml(item.file)}">
-                                    <span class="dashicons dashicons-update"></span> Retry
-                                </button>
-                            </div>
+                            <tr>
+                                <td><code>${escapeHtml(item.file)}</code></td>
+                                <td style="color: #d63638;">${escapeHtml(item.error)}</td>
+                                <td>
+                                    <button class="button button-small retry-single" data-file="${escapeHtml(item.file)}">
+                                        <span class="dashicons dashicons-update-alt" style="font-size: 13px; width: 13px; height: 13px;"></span>
+                                        <?php _e('Retry', 'wps3'); ?>
+                                    </button>
+                                </td>
+                            </tr>
                         `;
                     });
                     $('#failed-files-list').html(html);
                 } else {
                     $('#failed-files-section').slideUp();
+                    $('#failed-files-table').hide();
+                    $('#no-failed-message').show();
                 }
             }
             
@@ -662,14 +748,14 @@ class WPS3_Migration_V2 {
                     return;
                 }
                 
-                showMessage('Retrying ' + failedFiles.length + ' failed files...', 'info');
+                showNotice('Retrying ' + failedFiles.length + ' failed files...', 'info');
                 // TODO: Implement retry logic via AJAX
                 // For now, just clear the list
                 clearFailedList();
             }
             
             function retrySingleFile(fileName) {
-                showMessage('Retrying: ' + fileName, 'info');
+                showNotice('Retrying: ' + fileName, 'info');
                 // TODO: Implement single file retry logic
                 failedFiles = failedFiles.filter(f => f.file !== fileName);
                 updateFailedFilesDisplay();
