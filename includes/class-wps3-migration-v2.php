@@ -677,7 +677,7 @@ class WPS3_Migration_V2 {
             });
             
             // WordPress Admin Notices
-            function showNotice(message,type = 'info') {
+            function showNotice(message, type = 'info') {
                 const noticeClass = 'notice-' + type;
                 const isDismissible = type !== 'error' ? 'is-dismissible' : '';
                 
