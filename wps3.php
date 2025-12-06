@@ -516,3 +516,4 @@ function filter_by_date($files, $date_from, $date_to) { }
 <input type=\"number\" name=\"request_timeout\" min=\"5\" max=\"120\"> 
 <select name=\"periodic_migration\"> 
 function register_cron_job() { } 
+function run_scheduled_migration() { } 
