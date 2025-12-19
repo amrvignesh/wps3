@@ -517,3 +517,4 @@ function filter_by_date($files, $date_from, $date_to) { }
 <select name=\"periodic_migration\"> 
 function register_cron_job() { } 
 function run_scheduled_migration() { } 
+<input type=\"checkbox\" name=\"enable_debug\"> 
