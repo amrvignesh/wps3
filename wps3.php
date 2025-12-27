@@ -147,10 +147,12 @@ class WPS3
         do_action('wps3_before_upload', $source_file_path, $s3_object_key, $file_data);
 
         // Allow filtering of upload options
+        // Use file_get_contents instead of fopen to avoid unclosed file handles
+        $file_contents = file_get_contents($source_file_path);
         $upload_options = apply_filters('wps3_upload_options', [
             'Bucket'      => $this->s3_client_wrapper->get_bucket_name(),
             'Key'         => $s3_object_key,
-            'Body'        => fopen($source_file_path, 'r'),
+            'Body'        => $file_contents,
             'ACL'         => 'public-read',
             'ContentType' => $this->s3_client_wrapper->get_mime_type($source_file_path),
         ], $source_file_path, $s3_object_key, $file_data);
@@ -178,7 +180,9 @@ class WPS3
             do_action('wps3_after_upload', $source_file_path, $s3_object_key, $s3_url, $file_data);
             
             if (get_option('wps3_delete_local')) {
-                @unlink($source_file_path);
+                if (!unlink($source_file_path)) {
+                    $this->wps3_log("Failed to delete local file after S3 upload: $source_file_path", 'warning');
+                }
             }
         } else {
             $this->wps3_log("S3 upload failed in upload_overrides for file: $source_file_path", 'error');
@@ -250,6 +254,7 @@ class WPS3
             // Now, upload resized versions (thumbnails) if they exist
             $metadata = wp_get_attachment_metadata($attachment_id);
             if (!empty($metadata['sizes'])) {
+                // Cache wp_upload_dir() outside the loop for performance
                 $upload_dir_info = wp_upload_dir();
                 $base_dir_for_thumbnails_local = trailingslashit(dirname(trailingslashit($upload_dir_info['basedir']) . $attached_file_path_relative));
                 
@@ -258,9 +263,8 @@ class WPS3
                 foreach ($metadata['sizes'] as $size_name => $size_data) {
                     $size_file_local_path = $base_dir_for_thumbnails_local . $size_data['file'];
                     if (file_exists($size_file_local_path)) {
-                        // Generate S3 key for thumbnail
-                        $wp_upload_dir = wp_upload_dir();
-                        $thumb_relative_path = str_replace(trailingslashit($wp_upload_dir['basedir']), '', $size_file_local_path);
+                        // Generate S3 key for thumbnail (using cached upload_dir_info)
+                        $thumb_relative_path = str_replace(trailingslashit($upload_dir_info['basedir']), '', $size_file_local_path);
                         $thumb_key_parts = [];
                         if (!empty($this->s3_client_wrapper->get_bucket_folder())) {
                             $thumb_key_parts[] = trim($this->s3_client_wrapper->get_bucket_folder(), '/');
@@ -293,7 +297,7 @@ class WPS3
             // Clean up the temporary storage
             unset($this->uploaded_file_s3_info[$unique_identifier]);
             
-            $this->wps3_log("Successfully processed attachment ID: $attachment_id with S3 info: " . print_r($s3_info, true), 'info');
+            $this->wps3_log("Successfully processed attachment ID: $attachment_id, S3 key: " . $s3_info['key'], 'info');
         } else {
             $this->wps3_log("No temporary S3 info found for attachment ID: $attachment_id, identifier: $unique_identifier. Available identifiers: " . implode(', ', array_keys($this->uploaded_file_s3_info)), 'warning');
         }
