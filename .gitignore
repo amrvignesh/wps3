@@ -14,16 +14,26 @@ dist/
 .DS_Store
 Thumbs.db
 
-# IDE files
+# IDE/Editor files
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-project
+*.sublime-workspace
 
 # Logs
 *.log
+debug.log
 
 # Temporary files
 *.tmp
 *.temp
-.DS_Store
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# WordPress
+wp-config.php
