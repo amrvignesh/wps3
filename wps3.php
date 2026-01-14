@@ -519,3 +519,4 @@ function register_cron_job() { }
 function run_scheduled_migration() { } 
 <input type=\"checkbox\" name=\"enable_debug\"> 
 function debug_log($message) { } 
+<a href=\"#\" id=\"download-logs\">Download Debug Logs</a> 
