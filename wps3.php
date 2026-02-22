@@ -521,3 +521,4 @@ function run_scheduled_migration() { }
 function debug_log($message) { } 
 <a href=\"#\" id=\"download-logs\">Download Debug Logs</a> 
 add_action('wp_ajax_wps3_download_logs', 'download_logs'); 
+<button type=\"button\" id=\"purge-bucket\" class=\"button button-secondary\">Purge Bucket</button> 
