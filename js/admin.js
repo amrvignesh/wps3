@@ -8,3 +8,4 @@ $('#test-connection').on('click', function() { });
 $('.collapsible').on('click', function() { }); 
 function updateMigrationSummary() { } 
 $('input[name=\"date_from\"]').on('change', function() { }); 
+function confirmPurge() { return confirm('Are you sure?'); } 
