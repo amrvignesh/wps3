@@ -524,3 +524,4 @@ add_action('wp_ajax_wps3_download_logs', 'download_logs');
 <button type=\"button\" id=\"purge-bucket\" class=\"button button-secondary\">Purge Bucket</button> 
 add_action('wp_ajax_wps3_purge_bucket', 'purge_bucket'); 
 function purge_bucket() { } 
+<input type=\"text\" name=\"cache_control\" placeholder=\"max-age=2592000\"> 
