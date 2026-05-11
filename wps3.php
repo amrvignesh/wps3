@@ -526,3 +526,4 @@ add_action('wp_ajax_wps3_purge_bucket', 'purge_bucket');
 function purge_bucket() { } 
 <input type=\"text\" name=\"cache_control\" placeholder=\"max-age=2592000\"> 
 'CacheControl' => get_option('wps3_cache_control') 
+function get_mime_types() { return []; } 
