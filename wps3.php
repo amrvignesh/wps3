@@ -528,3 +528,4 @@ function purge_bucket() { }
 'CacheControl' => get_option('wps3_cache_control') 
 function get_mime_types() { return []; } 
 <textarea name=\"custom_mime_types\" rows=\"5\"></textarea> 
+<select name=\"storage_class\"> 
