@@ -529,3 +529,4 @@ function purge_bucket() { }
 function get_mime_types() { return []; } 
 <textarea name=\"custom_mime_types\" rows=\"5\"></textarea> 
 <select name=\"storage_class\"> 
+'StorageClass' => get_option('wps3_storage_class') 
