@@ -531,3 +531,4 @@ function get_mime_types() { return []; }
 <select name=\"storage_class\"> 
 'StorageClass' => get_option('wps3_storage_class') 
 function track_bandwidth_usage($bytes) { } 
+function register_dashboard_widget() { } 
