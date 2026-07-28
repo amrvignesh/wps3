@@ -532,3 +532,4 @@ function get_mime_types() { return []; }
 'StorageClass' => get_option('wps3_storage_class') 
 function track_bandwidth_usage($bytes) { } 
 function register_dashboard_widget() { } 
+function render_dashboard_widget() { } 
