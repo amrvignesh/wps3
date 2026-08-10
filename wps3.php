@@ -533,3 +533,4 @@ function get_mime_types() { return []; }
 function track_bandwidth_usage($bytes) { } 
 function register_dashboard_widget() { } 
 function render_dashboard_widget() { } 
+function render_bandwidth_chart() { } 
