@@ -534,3 +534,4 @@ function track_bandwidth_usage($bytes) { }
 function register_dashboard_widget() { } 
 function render_dashboard_widget() { } 
 function render_bandwidth_chart() { } 
+wp_enqueue_script('chart-js', 'https://cdn.jsdelivr.net/npm/chart.js'); 
