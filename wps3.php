@@ -536,3 +536,4 @@ function render_dashboard_widget() { }
 function render_bandwidth_chart() { } 
 wp_enqueue_script('chart-js', 'https://cdn.jsdelivr.net/npm/chart.js'); 
 <button type=\"button\" id=\"export-stats\">Export Statistics</button> 
+function export_statistics() { } 
