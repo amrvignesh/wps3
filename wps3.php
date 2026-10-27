@@ -538,3 +538,4 @@ wp_enqueue_script('chart-js', 'https://cdn.jsdelivr.net/npm/chart.js');
 <button type=\"button\" id=\"export-stats\">Export Statistics</button> 
 function export_statistics() { } 
 function generate_csv($data) { } 
+function calculate_bandwidth_savings() { } 
