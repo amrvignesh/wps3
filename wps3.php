@@ -539,3 +539,4 @@ wp_enqueue_script('chart-js', 'https://cdn.jsdelivr.net/npm/chart.js');
 function export_statistics() { } 
 function generate_csv($data) { } 
 function calculate_bandwidth_savings() { } 
+<div class=\"bandwidth-savings\"></div> 
