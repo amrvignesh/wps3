@@ -8,3 +8,4 @@
 .collapsible { cursor: pointer; } 
 .file-count { font-size: 16px; margin-bottom: 10px; } 
 #download-logs { display: inline-block; margin-top: 10px; } 
+.bandwidth-savings { font-weight: bold; color: green; } 
